@@ -78,17 +78,15 @@ export default function App() {
 
   const user = auth.user;
   const gate = hub?.gate.status ?? "checking";
-  // Внутрь пускаем только с подтверждённого устройства (или когда аккаунт не привязан к Key Hub).
-  if (gate !== "open") {
-    return <GateView gate={hub?.gate ?? { status: "checking" }} onRetry={refreshHub} onSignedOut={setAuth} />;
-  }
+  // В аккаунт, файлы и профиль пускает пароль; подтверждённое устройство нужно только для чатов Key Hub.
+  const chatsOpen = gate === "open";
 
   const ready = hub?.view?.state === "ready";
   const unread = ready ? totalUnread(user.id, hub!.view!.messages) : 0;
   const effective: View = view === "chats" && !hub?.view ? "files" : view;
 
   return (
-    <div className={`app-shell${effective === "chats" ? "" : " files-mode"}`}>
+    <div className={`app-shell${effective === "chats" && chatsOpen ? "" : " files-mode"}`}>
       <IconRail
         view={effective}
         initial={(user.name || user.login).slice(0, 1).toUpperCase()}
@@ -101,7 +99,10 @@ export default function App() {
           setView("chats");
         }}
       />
-      {effective === "chats" && hub ? <ChatsView userId={user.id} hub={hub} onState={applyHub} tick={tick} /> : null}
+      {effective === "chats" && !chatsOpen ? (
+        <GateView embedded gate={hub?.gate ?? { status: "checking" }} onRetry={refreshHub} onSignedOut={setAuth} />
+      ) : null}
+      {effective === "chats" && chatsOpen && hub ? <ChatsView userId={user.id} hub={hub} onState={applyHub} tick={tick} /> : null}
       {effective === "files" ? <FilesView quota={quota} onQuota={refreshQuota} tick={tick} /> : null}
       {effective === "profile" ? <ProfileView user={user} quota={quota} hub={hub} onHub={applyHub} onSignedOut={setAuth} /> : null}
       {effective === "settings" ? <SettingsView server={auth.server} /> : null}

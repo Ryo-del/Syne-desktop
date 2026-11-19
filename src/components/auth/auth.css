@@ -169,3 +169,13 @@
   border: 1px solid var(--line-strong);
   user-select: text;
 }
+
+/* Панель подтверждения устройства внутри вкладки «Чаты»: приложение остаётся доступным. */
+.auth-overlay.gate-embedded {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  flex: 1;
+  min-height: 0;
+  background: transparent;
+}

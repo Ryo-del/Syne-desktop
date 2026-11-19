@@ -8,6 +8,8 @@ interface Props {
   gate: HubGate;
   onRetry: () => void;
   onSignedOut: (s: AuthState) => void;
+  /** Панель внутри приложения (вкладка «Чаты»), а не на весь экран. */
+  embedded?: boolean;
 }
 
 const DENIED: Record<string, string> = {
@@ -17,7 +19,7 @@ const DENIED: Record<string, string> = {
 };
 
 /** Допуск в аккаунт только с подтверждённого устройства (Device Trust & Holding). */
-export default function GateView({ gate, onRetry, onSignedOut }: Props) {
+export default function GateView({ gate, onRetry, onSignedOut, embedded }: Props) {
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -30,19 +32,19 @@ export default function GateView({ gate, onRetry, onSignedOut }: Props) {
   const signOut = () => run(async () => onSignedOut(await api.hubCancel()));
 
   return (
-    <div className="auth-overlay">
+    <div className={embedded ? "auth-overlay gate-embedded" : "auth-overlay"}>
       <div className="auth-card">
         <h1 className="auth-title">Syne</h1>
 
         {gate.status === "waiting" ? (
           <>
             <p className="auth-subtitle">
-              Подтвердите подключение этого компьютера на доверенном устройстве (Syne Study или телефоне) и сверьте код.
+              Чтобы открыть чаты, подтвердите этот компьютер на доверенном устройстве (Syne Study или телефоне) и сверьте код. Файлы и профиль доступны уже сейчас.
             </p>
             <div className="gate-code">{gate.code}</div>
             <p className="auth-hint">Запрос действует 48 часов. Окно обновится само.</p>
             <button className="auth-button" disabled={busy} onClick={signOut}>
-              Отменить и выйти
+              Отменить запрос и выйти
             </button>
           </>
         ) : null}
