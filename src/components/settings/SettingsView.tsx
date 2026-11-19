@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
+import { isTauri } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
 
 import { applyTheme, loadTheme, type ThemePreference } from "../../lib/theme";
 import "../files/desktop.css";
@@ -11,6 +13,10 @@ const THEMES: { id: ThemePreference; label: string }[] = [
 
 export default function SettingsView({ server }: { server: string }) {
   const [theme, setTheme] = useState<ThemePreference>(loadTheme());
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    if (isTauri()) getVersion().then(setVersion).catch(() => undefined);
+  }, []);
   return (
     <div className="dk-page">
       <h1>Настройки</h1>
@@ -35,7 +41,7 @@ export default function SettingsView({ server }: { server: string }) {
       <div className="dk-card">
         <h2>Подключение</h2>
         <div className="dk-kv"><span>Сервер</span><span>{server}</span></div>
-        <div className="dk-kv"><span>Версия</span><span>0.1.0</span></div>
+        <div className="dk-kv"><span>Версия</span><span>{version || "—"}</span></div>
       </div>
     </div>
   );
