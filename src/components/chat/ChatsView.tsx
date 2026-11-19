@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { open as pickFile, save as pickSave } from "@tauri-apps/plugin-dialog";
+
 import * as api from "../../lib/api";
-import type { CloudChat, HubMessage, HubState } from "../../types";
+import { formatBytes } from "../../lib/format";
+import type { CloudChat, HubAttachment, HubMessage, HubState } from "../../types";
 import CloudConversation from "./CloudConversation";
 import "./chats.css";
 
@@ -44,6 +47,7 @@ export default function ChatsView({ userId, hub, onState, tick }: Props) {
   const [read, setRead] = useState<Record<string, number>>(() => load(`syne.read.${userId}`, {}));
   const [hidden, setHidden] = useState<Record<string, number>>(() => load(`syne.hidden.${userId}`, {}));
   const [safety, setSafety] = useState<string | null>(null);
+  const [viewer, setViewer] = useState<{ url: string; name: string } | null>(null);
   const stream = useRef<HTMLDivElement>(null);
   const [cloudChats, setCloudChats] = useState<CloudChat[]>([]);
   const loadChats = () => api.listChats().then(setCloudChats).catch(() => undefined);
@@ -127,6 +131,23 @@ export default function ChatsView({ userId, hub, onState, tick }: Props) {
     }
   }
 
+  async function attach() {
+    if (!selected || sending) return;
+    const picked = await pickFile({ multiple: false });
+    if (!picked || Array.isArray(picked)) return;
+    setSending(true);
+    setError("");
+    try {
+      onState(await api.hubSendFile(selected, picked, text.trim()));
+      setText("");
+    } catch (e) {
+      setError(errText(e));
+      void api.hubState().then(onState).catch(() => undefined);
+    } finally {
+      setSending(false);
+    }
+  }
+
   function hide(peer: string) {
     const next = { ...hidden, [peer]: lastTs(peer) || Math.floor(Date.now() / 1000) };
     setHidden(next);
@@ -176,7 +197,7 @@ export default function ChatsView({ userId, hub, onState, tick }: Props) {
                       {last ? <time>{time(last.ts)}</time> : null}
                     </div>
                     <div className="peer-card-info-bottom">
-                      <span>{last ? `${last.outgoing ? "Вы: " : ""}${last.text}` : ""}</span>
+                      <span>{last ? `${last.outgoing ? "Вы: " : ""}${last.att ? (last.att.kind === "photo" ? "Фото" : last.att.name) : last.text}` : ""}</span>
                       {n > 0 ? <span className="unread-badge">{n}</span> : null}
                     </div>
                   </div>
@@ -317,7 +338,8 @@ export default function ChatsView({ userId, hub, onState, tick }: Props) {
                         <div className="msg-sender">{names[m.from] ?? "Участник"}</div>
                       ) : null}
                       <div className={`msg-bubble ${m.outgoing ? "outgoing" : "incoming"}`}>
-                        <p className="msg-text">{m.text}</p>
+                        {m.att ? <AttachmentCard m={m} att={m.att} onError={setError} onView={setViewer} /> : null}
+                        {m.text ? <p className="msg-text">{m.text}</p> : null}
                         <div className="msg-meta">
                           <span className="msg-time">{time(m.ts)}</span>
                         </div>
@@ -343,6 +365,11 @@ export default function ChatsView({ userId, hub, onState, tick }: Props) {
             ) : null}
             <div className="composer">
               <div className="composer-input-row">
+                <button className="fx-icon-btn" title="Прикрепить файл" disabled={sending} onClick={() => void attach()}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                  </svg>
+                </button>
                 <textarea
                   placeholder="Сообщение"
                   value={text}
@@ -372,6 +399,18 @@ export default function ChatsView({ userId, hub, onState, tick }: Props) {
           </div>
         )}
       </div>
+
+      {viewer ? (
+        <div
+          className="fx-modal-backdrop"
+          onMouseDown={() => {
+            URL.revokeObjectURL(viewer.url);
+            setViewer(null);
+          }}
+        >
+          <img className="cx-viewer" src={viewer.url} alt={viewer.name} onMouseDown={(e) => e.stopPropagation()} />
+        </div>
+      ) : null}
 
       {safety !== null ? (
         <div className="fx-modal-backdrop" onMouseDown={() => setSafety(null)}>
@@ -422,4 +461,52 @@ export function totalUnread(userId: string, messages: HubMessage[]): number {
     const h = hidden[m.peer];
     return h === undefined || (last.get(m.peer) ?? 0) > h;
   }).length;
+}
+
+function AttachmentCard({ m, att, onError, onView }: { m: HubMessage; att: HubAttachment; onError: (s: string) => void; onView: (v: { url: string; name: string }) => void }) {
+  const [busy, setBusy] = useState(false);
+  const isPhoto = att.kind === "photo";
+
+  async function view() {
+    setBusy(true);
+    try {
+      onView({ url: URL.createObjectURL(await api.hubAttachmentBlob(m.id)), name: att.name });
+    } catch (e) {
+      onError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    try {
+      const dest = await pickSave({ defaultPath: att.name });
+      if (!dest) return;
+      setBusy(true);
+      await api.hubSaveAttachment(m.id, dest);
+    } catch (e) {
+      onError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="cx-att">
+      {isPhoto && att.thumb ? (
+        <img className="cx-thumb" src={`data:image/jpeg;base64,${att.thumb}`} alt={att.name} onClick={() => void view()} />
+      ) : null}
+      <button className="cx-file" disabled={busy} onClick={() => void (isPhoto ? view() : save())}>
+        <strong>{att.name}</strong>
+        <small>
+          {formatBytes(att.size)} · {busy ? "загрузка…" : isPhoto ? "открыть" : "сохранить"}
+        </small>
+      </button>
+      {isPhoto ? (
+        <button className="fx-link" onClick={() => void save()}>
+          Сохранить…
+        </button>
+      ) : null}
+    </div>
+  );
 }

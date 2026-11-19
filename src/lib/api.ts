@@ -211,3 +211,10 @@ export async function openEvents(onEvent: (type: string) => void): Promise<() =>
   es.addEventListener("signed_out", () => signedOutListeners.forEach((fn) => fn()));
   return () => es.close();
 }
+
+// ── вложения Key Hub: шифрование и загрузка делает локальный сервис ──
+export const hubSendFile = (peer: string, path: string, caption = "") =>
+  json<HubState>("/hub/send-file", send("POST", { peer, path, caption }));
+export const hubSaveAttachment = (id: string, dest: string) =>
+  json<HubState>("/hub/attachment/save", send("POST", { id, dest }));
+export const hubAttachmentBlob = async (id: string) => (await request(`/hub/attachment${qs({ id })}`)).blob();

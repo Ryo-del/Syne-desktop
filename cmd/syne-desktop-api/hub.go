@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,7 @@ func (h *hubService) start(userID string) {
 	h.engine = hubdev.New(hubdev.HTTPCloud{C: h.s.cl},
 		hubdev.KeyringStore{Account: "device-" + userID},
 		hubdev.FileStorage{Path: filepath.Join(dataDir(), "hub-"+userID+".json")})
+	h.engine.SetCacheDir(filepath.Join(dataDir(), "cache-"+userID))
 	ctx, cancel := context.WithCancel(context.Background())
 	h.cancelLoop = cancel
 	e := h.engine
@@ -240,6 +242,51 @@ func (h *hubService) register(mux *http.ServeMux) {
 		_, err := e.Send(ctx, in.Text, in.Peer)
 		return err
 	}))
+	mux.HandleFunc("/hub/send-file", h.post(func(ctx context.Context, e *hubdev.Engine, r *http.Request) error {
+		var in struct{ Peer, Path, Caption string }
+		if err := readJSON(r, &in); err != nil || in.Peer == "" || in.Path == "" {
+			return errBad
+		}
+		_, err := e.SendFile(ctx, in.Peer, in.Path, in.Caption)
+		return err
+	}))
+	mux.HandleFunc("/hub/attachment/save", h.post(func(ctx context.Context, e *hubdev.Engine, r *http.Request) error {
+		var in struct{ ID, Dest string }
+		if err := readJSON(r, &in); err != nil || in.ID == "" || in.Dest == "" {
+			return errBad
+		}
+		return e.SaveAttachment(ctx, in.ID, in.Dest)
+	}))
+	// Просмотр вложения: расшифровывается и проверяется до отдачи. Только картинки показываем как картинки.
+	mux.HandleFunc("/hub/attachment", func(w http.ResponseWriter, r *http.Request) {
+		e := h.get()
+		if e == nil {
+			writeJSON(w, 409, map[string]string{"error": "no_hub", "message": "Key Hub не запущен."})
+			return
+		}
+		id := r.URL.Query().Get("id")
+		path, err := e.Fetch(r.Context(), id)
+		if err != nil {
+			writeHubErr(w, err)
+			return
+		}
+		ctype := "application/octet-stream"
+		for _, m := range e.Snapshot().Messages {
+			if m.ID == id && m.Att != nil && m.Att.Kind == "photo" {
+				switch strings.ToLower(filepath.Ext(m.Att.Name)) {
+				case ".jpg", ".jpeg":
+					ctype = "image/jpeg"
+				case ".png":
+					ctype = "image/png"
+				case ".gif":
+					ctype = "image/gif"
+				}
+			}
+		}
+		w.Header().Set("Content-Type", ctype)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeFile(w, r, path)
+	})
 	mux.HandleFunc("/hub/approve", h.post(func(ctx context.Context, e *hubdev.Engine, r *http.Request) error {
 		var in struct {
 			RequestID string `json:"request_id"`

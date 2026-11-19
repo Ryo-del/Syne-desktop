@@ -1,8 +1,10 @@
 package hubdev
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"testing"
 	"time"
@@ -48,6 +50,10 @@ type fakeCloud struct {
 	inbox    []hub.InboxItem
 	nextID   int64
 	notBound bool
+
+	blobs    map[string][]byte
+	complete map[string]bool
+	access   map[string]map[string]bool
 }
 
 func (f *fakeCloud) Me(ctx context.Context) (string, string, error) {
@@ -97,6 +103,13 @@ func (f *fakeCloud) PostInbox(_ context.Context, p hub.InboxPost) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID++
+	for _, b := range p.Blobs {
+		if f.access[b] == nil {
+			f.access[b] = map[string]bool{}
+		}
+		f.access[b][p.From] = true
+		f.access[b][p.To] = true
+	}
 	f.inbox = append(f.inbox, hub.InboxItem{ID: f.nextID, From: p.From, To: p.To, MsgID: p.MsgID, Envelope: p.Envelope, At: time.Now().Unix()})
 	return nil
 }
@@ -279,4 +292,45 @@ func TestCancelAndRestartPersist(t *testing.T) {
 	if e2.State() != NotSetUp || keys.raw != nil {
 		t.Fatal("после отмены ключ и состояние стёрты")
 	}
+}
+
+// ── вложения в подменённом облаке ──
+
+func (f *fakeCloud) Limits(context.Context) (Limits, error) {
+	return Limits{Max: 1 << 20, GroupMax: 1 << 19}, nil
+}
+
+func (f *fakeCloud) BlobStart(_ context.Context, _ *hub.DeviceKey, _, id string, size int64) (int64, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.blobs == nil {
+		f.blobs, f.complete, f.access = map[string][]byte{}, map[string]bool{}, map[string]map[string]bool{}
+	}
+	return int64(len(f.blobs[id])), f.complete[id], nil
+}
+
+func (f *fakeCloud) BlobPut(_ context.Context, _ *hub.DeviceKey, _, id string, _, offset int64, data []byte) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if offset != int64(len(f.blobs[id])) {
+		return 0, &OffsetError{Received: int64(len(f.blobs[id]))}
+	}
+	f.blobs[id] = append(f.blobs[id], data...)
+	return int64(len(f.blobs[id])), nil
+}
+
+func (f *fakeCloud) BlobComplete(_ context.Context, _ *hub.DeviceKey, _, id string, _ int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.complete[id] = true
+	return nil
+}
+
+func (f *fakeCloud) BlobGet(_ context.Context, _ *hub.DeviceKey, login, id string) (io.ReadCloser, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.complete[id] || !f.access[id][login] {
+		return nil, &CodeError{Code: "not_found", Message: "нет доступа", Status: 404}
+	}
+	return io.NopCloser(bytes.NewReader(f.blobs[id])), nil
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,6 +40,8 @@ type Engine struct {
 	trust  *hub.TrustStore
 	state  LinkState
 	view   atomic.Value // View
+
+	cacheDir string
 }
 
 func New(cloud Cloud, keys KeyStore, store Storage) *Engine {
@@ -109,7 +112,7 @@ type View struct {
 func (e *Engine) publish() {
 	v := View{State: e.state, Login: e.data.Login, ShortLogin: shortLogin(e.data.Login), SchoolName: e.data.SchoolName,
 		PairCode: e.data.PendingCode, Request: e.data.RequestStatus, Names: e.data.People, Accounts: e.data.Accounts,
-		Messages: append([]Message(nil), e.data.Messages...), Devices: []DeviceView{}}
+		Messages: publicMessages(e.data.Messages), Devices: []DeviceView{}}
 	if e.device != nil {
 		v.DeviceID = e.device.DeviceID()
 		if e.own != nil {
@@ -250,6 +253,7 @@ func (e *Engine) resetLocked() {
 	e.trust = hub.NewTrustStore()
 	e.data = localData{}
 	e.store.Save(e.data)
+	_ = os.RemoveAll(e.cache())
 	e.state = NotSetUp
 	e.publish()
 }
@@ -532,54 +536,42 @@ func (e *Engine) requireReady() (*hub.DeviceKey, error) {
 	return e.device, nil
 }
 
-// Send шифрует и кладёт сообщение во входящие облака: для устройств собеседника и своих.
-func (e *Engine) Send(ctx context.Context, text, peer string) (Message, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// sendTarget — кому и как шифровать сообщение.
+type sendTarget struct {
+	rcpts     []hub.Certificate
+	context   []byte
+	to        string
+	group     int64
+	groupName string
+	members   []string
+}
+
+func (e *Engine) target(ctx context.Context, peer string) (sendTarget, error) {
 	if rest, ok := strings.CutPrefix(peer, "group:"); ok {
 		id, err := strconv.ParseInt(rest, 10, 64)
 		if err != nil {
-			return Message{}, FormatError("номер группы")
+			return sendTarget{}, FormatError("номер группы")
 		}
-		return e.sendGroup(ctx, text, id)
-	}
-	dev, err := e.requireReady()
-	if err != nil {
-		return Message{}, err
+		return e.groupTarget(ctx, id)
 	}
 	pl, err := e.peerLog(ctx, peer, false)
 	if err != nil {
-		return Message{}, err
+		return sendTarget{}, err
 	}
 	rcpts := pl.State().ActiveDevices(e.now())
 	if len(rcpts) == 0 {
-		return Message{}, FormatError("у получателя нет доверенных устройств")
+		return sendTarget{}, FormatError("у получателя нет доверенных устройств")
 	}
 	if e.own != nil {
 		rcpts = append(rcpts, e.own.ActiveDevices(e.now())...)
 	}
-	env, err := hub.Seal([]byte(text), chatContext(e.data.Login, peer), dev, rcpts)
-	if err != nil {
-		return Message{}, err
-	}
-	m := Message{ID: newID(), Peer: peer, From: e.data.Login, Text: text, TS: e.now().Unix(), Outgoing: true}
-	if err := e.cloud.PostInbox(ctx, hub.InboxPost{From: e.data.Login, To: peer, Envelope: env, MsgID: m.ID}); err != nil {
-		return Message{}, err
-	}
-	e.data.Messages = append(e.data.Messages, m)
-	e.persist()
-	e.publish()
-	return m, nil
+	return sendTarget{rcpts: rcpts, context: chatContext(e.data.Login, peer), to: peer}, nil
 }
 
-func (e *Engine) sendGroup(ctx context.Context, text string, group int64) (Message, error) {
-	dev, err := e.requireReady()
-	if err != nil {
-		return Message{}, err
-	}
+func (e *Engine) groupTarget(ctx context.Context, group int64) (sendTarget, error) {
 	rosters, err := e.verifiedRosters(ctx)
 	if err != nil {
-		return Message{}, err
+		return sendTarget{}, err
 	}
 	var roster *hub.GroupRoster
 	for i := range rosters {
@@ -588,10 +580,10 @@ func (e *Engine) sendGroup(ctx context.Context, text string, group int64) (Messa
 		}
 	}
 	if roster == nil {
-		return Message{}, FormatError("состав группы не получен или устарел: попробуйте ещё раз")
+		return sendTarget{}, FormatError("состав группы не получен или устарел: попробуйте ещё раз")
 	}
 	if !roster.HasMember(e.data.Login) {
-		return Message{}, FormatError("вы не состоите в этой группе")
+		return sendTarget{}, FormatError("вы не состоите в этой группе")
 	}
 	var rcpts []hub.Certificate
 	for _, member := range roster.Members {
@@ -601,7 +593,7 @@ func (e *Engine) sendGroup(ctx context.Context, text string, group int64) (Messa
 		l, err := e.peerLog(ctx, member, false)
 		var te *TrustError
 		if errors.As(err, &te) {
-			return Message{}, err // сменилась идентичность участника: нужно решение человека
+			return sendTarget{}, err // сменилась идентичность участника: нужно решение человека
 		}
 		if err != nil {
 			continue // нет Hub или реестр недоступен
@@ -612,18 +604,46 @@ func (e *Engine) sendGroup(ctx context.Context, text string, group int64) (Messa
 		rcpts = append(rcpts, e.own.ActiveDevices(e.now())...)
 	}
 	if len(rcpts) == 0 {
-		return Message{}, FormatError("у участников группы нет доверенных устройств")
+		return sendTarget{}, FormatError("у участников группы нет доверенных устройств")
 	}
-	env, err := hub.Seal([]byte(text), []byte(fmt.Sprintf("grp:%d", group)), dev, rcpts)
+	return sendTarget{rcpts: rcpts, context: []byte(fmt.Sprintf("grp:%d", group)), group: group, groupName: roster.Name, members: roster.Members}, nil
+}
+
+// deliver запечатывает plaintext и кладёт во входящие; blobs — привязанные вложения.
+func (e *Engine) deliver(ctx context.Context, dev *hub.DeviceKey, t sendTarget, plaintext []byte, blobs []string) (Message, error) {
+	env, err := hub.Seal(plaintext, t.context, dev, t.rcpts)
 	if err != nil {
 		return Message{}, err
 	}
-	m := Message{ID: newID(), Peer: fmt.Sprintf("group:%d", group), From: e.data.Login, Text: text, TS: e.now().Unix(),
-		Outgoing: true, GroupName: roster.Name}
-	post := hub.InboxPost{From: e.data.Login, Envelope: env, MsgID: m.ID, Group: group, GroupName: roster.Name, Members: roster.Members}
+	m := Message{ID: newID(), Peer: t.to, From: e.data.Login, TS: e.now().Unix(), Outgoing: true}
+	post := hub.InboxPost{From: e.data.Login, To: t.to, Envelope: env, MsgID: m.ID, Blobs: blobs}
+	if t.group != 0 {
+		m.Peer, m.GroupName = fmt.Sprintf("group:%d", t.group), t.groupName
+		post = hub.InboxPost{From: e.data.Login, Envelope: env, MsgID: m.ID, Group: t.group, GroupName: t.groupName, Members: t.members, Blobs: blobs}
+	}
 	if err := e.cloud.PostInbox(ctx, post); err != nil {
 		return Message{}, err
 	}
+	return m, nil
+}
+
+// Send шифрует и кладёт сообщение во входящие облака: для устройств собеседника и своих.
+func (e *Engine) Send(ctx context.Context, text, peer string) (Message, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	dev, err := e.requireReady()
+	if err != nil {
+		return Message{}, err
+	}
+	t, err := e.target(ctx, peer)
+	if err != nil {
+		return Message{}, err
+	}
+	m, err := e.deliver(ctx, dev, t, []byte(text), nil)
+	if err != nil {
+		return Message{}, err
+	}
+	m.Text = text
 	e.data.Messages = append(e.data.Messages, m)
 	e.persist()
 	e.publish()
@@ -683,6 +703,18 @@ func (e *Engine) Poll(ctx context.Context) ([]Message, error) {
 			var pt []byte
 			if pt, err = hub.Open(it.Envelope, dev, *cert); err == nil {
 				m := Message{ID: it.MsgID, Peer: peer, From: it.From, Text: string(pt), TS: it.At, Outgoing: outgoing}
+				if hub.IsAttachment(pt) {
+					thumbMax := hub.MaxThumb
+					if it.Group != 0 {
+						thumbMax = hub.MaxThumbGroup
+					}
+					m.Text = ""
+					if a, aerr := hub.DecodeAttachment(pt); aerr == nil && a.Validate(0, thumbMax) == nil {
+						m.Att, m.Text = a, a.Caption
+					} else {
+						m.Text = "Вложение повреждено или не поддерживается"
+					}
+				}
 				if it.Group != 0 {
 					m.GroupName = it.GroupName
 				}
@@ -720,5 +752,19 @@ func (e *Engine) Peers() []string {
 		out = append(out, p)
 	}
 	sort.Slice(out, func(i, j int) bool { return latest[out[i]] > latest[out[j]] })
+	return out
+}
+
+// publicMessages — копия сообщений без ключей файлов: интерфейс их не получает.
+func publicMessages(in []Message) []Message {
+	out := make([]Message, len(in))
+	for i, m := range in {
+		if m.Att != nil {
+			a := *m.Att
+			a.Key = nil
+			m.Att = &a
+		}
+		out[i] = m
+	}
 	return out
 }
