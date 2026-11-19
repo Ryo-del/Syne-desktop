@@ -26,13 +26,14 @@ func memStore(t *testing.T) {
 
 // fakeCloud — минимальный Syne Cloud: пароль, refresh, загрузка чанками, скачивание.
 type fakeCloud struct {
-	mu        sync.Mutex
-	access    string
-	gen       int
-	data      []byte
-	sha       string
-	size      int64
-	refreshes int
+	mu           sync.Mutex
+	access       string
+	gen          int
+	data         []byte
+	sha          string
+	size         int64
+	refreshes    int
+	rejectClient bool // сервер не пускает этот клиент по паролю
 }
 
 func (f *fakeCloud) handler() http.Handler {
@@ -49,8 +50,14 @@ func (f *fakeCloud) handler() http.Handler {
 		r.ParseForm()
 		switch r.PostForm.Get("grant_type") {
 		case "password":
-			if r.PostForm.Get("password") != "secret123" || r.PostForm.Get("client_id") != ClientID {
+			if f.rejectClient || r.PostForm.Get("client_id") != ClientID {
 				w.WriteHeader(400)
+				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized_client"})
+				return
+			}
+			if r.PostForm.Get("password") != "secret123" {
+				w.WriteHeader(400)
+				json.NewEncoder(w).Encode(map[string]string{"error": "invalid_grant"})
 				return
 			}
 		case "refresh_token":
@@ -196,5 +203,22 @@ func TestRevokedRefreshSignsOut(t *testing.T) {
 	}
 	if c.HasSession() {
 		t.Fatal("недействительный вход должен стираться")
+	}
+}
+
+func TestLoginExplainsWhyItFailed(t *testing.T) {
+	memStore(t)
+	srv := httptest.NewServer((&fakeCloud{}).handler())
+	defer srv.Close()
+	c := New(srv.URL, "тест")
+	if err := c.Login("ivan", "wrong"); err == nil || err.(*Error).Code != "invalid_grant" {
+		t.Fatalf("неверный пароль: %v", err)
+	}
+	// Сервер не пускает этот клиент по паролю: пользователю не нужно говорить «неверный пароль».
+	srv2 := httptest.NewServer((&fakeCloud{rejectClient: true}).handler())
+	defer srv2.Close()
+	err := New(srv2.URL, "тест").Login("ivan", "secret123")
+	if e, ok := err.(*Error); !ok || e.Code != "unauthorized_client" || e.Message == "Неверный логин или пароль." {
+		t.Fatalf("отказ клиенту должен объясняться отдельно: %v", err)
 	}
 }

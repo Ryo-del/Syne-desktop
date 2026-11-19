@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -142,10 +143,21 @@ func (c *Client) Login(username, password string) error {
 		return nil
 	case 429:
 		return &Error{Status: 429, Code: "too_many_attempts", Message: "Слишком много попыток. Подождите несколько минут."}
-	case 400, 401:
-		return &Error{Status: resp.StatusCode, Code: "invalid_grant", Message: "Неверный логин или пароль."}
 	}
-	return &Error{Status: resp.StatusCode, Code: "unavailable", Message: "Не удалось войти. Попробуйте ещё раз."}
+	// Остальные ответы различаем по коду OAuth: «неверный пароль» и «сервер не пускает это приложение» — разные вещи.
+	var body struct {
+		Error string `json:"error"`
+	}
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&body)
+	switch {
+	case body.Error == "invalid_grant":
+		return &Error{Status: resp.StatusCode, Code: "invalid_grant", Message: "Неверный логин или пароль."}
+	case body.Error == "unauthorized_client" || body.Error == "invalid_client":
+		return &Error{Status: resp.StatusCode, Code: body.Error, Message: "Сервер не разрешает вход этому приложению. Обновите сервер Syne Cloud."}
+	case resp.StatusCode == 401 || resp.StatusCode == 400:
+		return &Error{Status: resp.StatusCode, Code: "invalid_grant", Message: "Не удалось войти: проверьте логин и пароль (ответ сервера " + strconv.Itoa(resp.StatusCode) + ")."}
+	}
+	return &Error{Status: resp.StatusCode, Code: "unavailable", Message: "Не удалось войти. Попробуйте ещё раз (ответ сервера " + strconv.Itoa(resp.StatusCode) + ")."}
 }
 
 // Refresh обновляет токены. stale — токен, с которым пришёл неудачный запрос:
