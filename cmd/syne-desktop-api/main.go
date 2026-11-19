@@ -46,6 +46,7 @@ func main() {
 	mux.HandleFunc("/auth/logout", s.handleLogout)
 	mux.HandleFunc("/cloud/", s.handleProxy)
 	s.hub.register(mux)
+	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/transfers", s.handleTransfers)
 	mux.HandleFunc("/transfers/upload", s.handleUpload)
 	mux.HandleFunc("/transfers/download", s.handleDownload)
@@ -84,7 +85,11 @@ func (s *server) guard(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
-		if s.token != "" && subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Syne-Token")), []byte(s.token)) != 1 {
+		tok := r.Header.Get("X-Syne-Token")
+		if tok == "" && r.URL.Path == "/events" { // EventSource не умеет заголовки
+			tok = r.URL.Query().Get("token")
+		}
+		if s.token != "" && subtle.ConstantTimeCompare([]byte(tok), []byte(s.token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

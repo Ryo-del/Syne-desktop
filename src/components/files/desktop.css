@@ -36,3 +36,6 @@
 .dk-danger { color: var(--danger); }
 .rail-badge { position: absolute; top: 2px; right: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 0.68rem; font-weight: 700; display: grid; place-items: center; }
 .rail-dot { position: absolute; top: 0; right: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--danger); border: 2px solid var(--bg); }
+.dk-editor { width: min(94vw, 960px); height: min(86vh, 720px); }
+.dk-editor-area { flex: 1; min-height: 0; resize: none; padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--line-strong); background: var(--bg); color: var(--ink); font: 13px/1.55 "JetBrains Mono", ui-monospace, monospace; tab-size: 2; outline: none; user-select: text; white-space: pre; overflow: auto; }
+.dk-editor-area:focus { border-color: var(--accent); }

@@ -2,7 +2,10 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 
 import type {
   AuthState,
+  CloudChat,
   CloudFile,
+  CloudMember,
+  CloudMessage,
   Device,
   FileVersion,
   HubState,
@@ -163,3 +166,48 @@ export const hubAcceptPeer = (peer: string) => json<HubState>("/hub/accept-peer"
 export const hubRoster = (confirm: boolean) => json<HubState>("/hub/roster", send("POST", { confirm }));
 export const hubSafety = async (peer: string) =>
   (await json<{ number: string }>(`/hub/safety${qs({ peer })}`)).number;
+
+// ── обычные облачные чаты (открытым текстом) ──
+export const listChats = async () => (await json<{ chats: CloudChat[] }>("/cloud/chats")).chats;
+export const lookupUser = (login: string) => json<CloudMember>(`/cloud/users/lookup${qs({ login })}`);
+export const openChat = (memberId: string) =>
+  json<CloudChat>("/cloud/chats", send("POST", { member_ids: [memberId], is_group: false }));
+export const listMessages = async (chatId: string, after?: number) =>
+  (await json<{ messages: CloudMessage[] }>(`/cloud/chats/${chatId}/messages${qs({ after: after === undefined ? undefined : String(after), limit: "200" })}`)).messages;
+export const sendMessage = (chatId: string, body: string) =>
+  json<CloudMessage>(`/cloud/chats/${chatId}/messages`, send("POST", { client_id: crypto.randomUUID(), body }));
+export async function sendAttachment(chatId: string, file: File, body = ""): Promise<CloudMessage> {
+  return json<CloudMessage>(
+    `/cloud/chats/${chatId}/attachments${qs({ client_id: crypto.randomUUID(), name: file.name, body })}`,
+    { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: file },
+  );
+}
+export const chatAttachment = async (chatId: string, messageId: number) =>
+  (await request(`/cloud/chats/${chatId}/messages/${messageId}/attachment`)).blob();
+
+// ── текстовые файлы ──
+export async function readText(id: string): Promise<string> {
+  return (await request(`/cloud/files/${id}/content?inline=1`)).text();
+}
+/** Сохраняет новую версию. conflict=true: файл успели изменить, ваш текст сохранён копией. */
+export async function writeText(file: CloudFile, text: string) {
+  return json<{ file?: CloudFile; conflict?: boolean; unchanged?: boolean }>(
+    `/cloud/files/content${qs({ file_id: file.id, base_version: String(file.version), name: file.name })}`,
+    { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: text },
+  );
+}
+
+// ── события облака (WebSocket через локальный сервис) ──
+export async function openEvents(onEvent: (type: string) => void): Promise<() => void> {
+  await ready;
+  const es = new EventSource(`${API_BASE}/events${apiToken ? `?token=${apiToken}` : ""}`);
+  es.onmessage = (e) => {
+    try {
+      onEvent((JSON.parse(e.data) as { type?: string }).type ?? "");
+    } catch {
+      /* не JSON */
+    }
+  };
+  es.addEventListener("signed_out", () => signedOutListeners.forEach((fn) => fn()));
+  return () => es.close();
+}

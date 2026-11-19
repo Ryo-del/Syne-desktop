@@ -7,6 +7,7 @@ require github.com/zalando/go-keyring v0.2.6
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
 	github.com/Ryo-del/Syne-protocol v0.4.0 // indirect
+	github.com/coder/websocket v1.8.13 // indirect
 	github.com/danieljoos/wincred v1.2.2 // indirect
 	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
