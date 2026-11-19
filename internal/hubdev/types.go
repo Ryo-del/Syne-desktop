@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"github.com/Ryo-del/Syne-protocol/hub"
 )
@@ -23,6 +24,8 @@ type Message struct {
 	TS        int64  `json:"ts"`
 	Outgoing  bool   `json:"outgoing"`
 	GroupName string `json:"group_name,omitempty"`
+	// Att — вложение. Ключ файла хранится только локально и в интерфейс не отдаётся.
+	Att *hub.Attachment `json:"att,omitempty"`
 }
 
 // Person — человек школы с Hub.
@@ -51,6 +54,13 @@ type Cloud interface {
 	PostOp(ctx context.Context, op hub.CloudOp) error
 	PostInbox(ctx context.Context, p hub.InboxPost) error
 	FetchInbox(ctx context.Context, login string, after int64, key *hub.DeviceKey) ([]hub.InboxItem, error)
+
+	// Вложения (файл 13).
+	Limits(ctx context.Context) (Limits, error)
+	BlobStart(ctx context.Context, key *hub.DeviceKey, login, id string, size int64) (received int64, complete bool, err error)
+	BlobPut(ctx context.Context, key *hub.DeviceKey, login, id string, size, offset int64, data []byte) (received int64, err error)
+	BlobComplete(ctx context.Context, key *hub.DeviceKey, login, id string, size int64) error
+	BlobGet(ctx context.Context, key *hub.DeviceKey, login, id string) (io.ReadCloser, error)
 }
 
 // KeyStore хранит ключ устройства (связка ключей ОС).
@@ -108,6 +118,7 @@ var (
 type CodeError struct {
 	Code, Message string
 	Status        int
+	Received      int64 // для offset_mismatch
 }
 
 func (e *CodeError) Error() string { return e.Message }

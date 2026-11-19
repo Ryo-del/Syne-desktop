@@ -77,6 +77,18 @@ export interface HubMessage {
   ts: number;
   outgoing: boolean;
   group_name?: string;
+  att?: HubAttachment;
+}
+
+export interface HubAttachment {
+  kind: "photo" | "file";
+  name: string;
+  mime?: string;
+  size: number;
+  caption?: string;
+  thumb?: string; // base64 JPEG
+  w?: number;
+  h?: number;
 }
 
 export interface HubDevice {

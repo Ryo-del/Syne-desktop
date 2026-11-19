@@ -21,13 +21,16 @@ import (
 type HTTPCloud struct{ C *cloud.Client }
 
 func decodeErr(resp *http.Response) error {
-	var b struct{ Error, Message string }
+	var b struct {
+		Error, Message string
+		Received       int64
+	}
 	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<16)).Decode(&b)
 	msg := b.Message
 	if msg == "" {
 		msg = fmt.Sprintf("Ошибка сервера (%d)", resp.StatusCode)
 	}
-	return &CodeError{Code: b.Error, Message: msg, Status: resp.StatusCode}
+	return &CodeError{Code: b.Error, Message: msg, Status: resp.StatusCode, Received: b.Received}
 }
 
 // authed — запрос с токеном аккаунта.
@@ -60,7 +63,12 @@ func (h HTTPCloud) signed(ctx context.Context, method, path, query string, body 
 		u += "?" + query
 	}
 	var rd io.Reader
-	if body != nil {
+	ctype := "application/json"
+	switch b := body.(type) {
+	case nil:
+	case []byte:
+		rd, ctype = bytes.NewReader(b), "application/octet-stream"
+	default:
 		raw, _ := json.Marshal(body)
 		rd = bytes.NewReader(raw)
 	}
@@ -69,7 +77,7 @@ func (h HTTPCloud) signed(ctx context.Context, method, path, query string, body 
 		return err
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", ctype)
 	}
 	if auth != nil {
 		req.Header.Set("X-Hub-Device", auth.DeviceID)
@@ -162,4 +170,61 @@ func (h HTTPCloud) FetchInbox(ctx context.Context, login string, after int64, ke
 	q := url.Values{"after": {strconv.FormatInt(after, 10)}}.Encode()
 	err := h.signed(ctx, "GET", "hub/inbox/"+url.PathEscape(login), q, nil, &a, &r)
 	return r.Items, err
+}
+
+// ── вложения ──
+
+func (h HTTPCloud) Limits(ctx context.Context) (Limits, error) {
+	var l Limits
+	err := h.authed(ctx, "GET", "hub/limits", "", nil, &l)
+	return l, err
+}
+
+func (h HTTPCloud) BlobStart(ctx context.Context, key *hub.DeviceKey, login, id string, size int64) (int64, bool, error) {
+	a := key.SignBlob(hub.DomainBlobPut, login, id, size, time.Now())
+	var r struct {
+		Received int64 `json:"received"`
+		Complete bool  `json:"complete"`
+	}
+	err := h.signed(ctx, "POST", "hub/blobs", "", map[string]any{"from": login, "blob": id, "size": size}, &a, &r)
+	return r.Received, r.Complete, err
+}
+
+func (h HTTPCloud) BlobPut(ctx context.Context, key *hub.DeviceKey, login, id string, size, offset int64, data []byte) (int64, error) {
+	a := key.SignBlob(hub.DomainBlobPut, login, id, size, time.Now())
+	var r struct {
+		Received int64 `json:"received"`
+	}
+	q := url.Values{"from": {login}, "offset": {strconv.FormatInt(offset, 10)}}.Encode()
+	err := h.signed(ctx, "PUT", "hub/blobs/"+id, q, data, &a, &r)
+	if ce, ok := err.(*CodeError); ok && ce.Code == "offset_mismatch" {
+		return 0, &OffsetError{Received: ce.Received}
+	}
+	return r.Received, err
+}
+
+func (h HTTPCloud) BlobComplete(ctx context.Context, key *hub.DeviceKey, login, id string, size int64) error {
+	a := key.SignBlob(hub.DomainBlobPut, login, id, size, time.Now())
+	return h.signed(ctx, "POST", "hub/blobs/"+id+"/complete", url.Values{"from": {login}}.Encode(), nil, &a, nil)
+}
+
+func (h HTTPCloud) BlobGet(ctx context.Context, key *hub.DeviceKey, login, id string) (io.ReadCloser, error) {
+	a := key.SignBlob(hub.DomainBlobGet, login, id, 0, time.Now())
+	u := h.C.Server() + "/api/v1/hub/blobs/" + id + "?" + url.Values{"login": {login}}.Encode()
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Hub-Device", a.DeviceID)
+	req.Header.Set("X-Hub-Ts", strconv.FormatInt(a.TS, 10))
+	req.Header.Set("X-Hub-Sig", base64.StdEncoding.EncodeToString(a.Sig))
+	resp, err := (&http.Client{}).Do(req) // без общего таймаута: файл может быть большим
+	if err != nil {
+		return nil, &cloud.Error{Code: "unavailable", Message: "Нет связи с сервером."}
+	}
+	if resp.StatusCode >= 400 {
+		defer resp.Body.Close()
+		return nil, decodeErr(resp)
+	}
+	return resp.Body, nil
 }

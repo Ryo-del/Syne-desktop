@@ -2,3 +2,6 @@
 .cx-safety { font-family: "JetBrains Mono", monospace; font-size: 0.95rem; line-height: 1.7; padding: 10px 12px; border-radius: var(--radius-md); background: var(--field-bg, var(--surface)); user-select: text; word-break: break-word; }
 .cx-file { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 8px 10px; margin-bottom: 4px; border-radius: 10px; background: rgba(255,255,255,0.12); text-align: left; color: inherit; }
 .cx-file small { opacity: 0.75; }
+.cx-att { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.cx-thumb { max-width: 260px; max-height: 260px; border-radius: 10px; cursor: zoom-in; display: block; }
+.cx-viewer { max-width: 92vw; max-height: 90vh; border-radius: 8px; box-shadow: var(--shadow-lg); }
