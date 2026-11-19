@@ -4,6 +4,8 @@ import type { View } from "../../types";
 interface Props {
   view: View;
   initial: string;
+  unread: number;
+  approvals: number;
   onView: (v: View) => void;
   onLogout: () => void;
 }
@@ -20,11 +22,24 @@ const stroke = {
   strokeLinejoin: "round" as const,
 };
 
-export default function IconRail({ view, initial, onView, onLogout }: Props) {
+export default function IconRail({ view, initial, unread, approvals, onView, onLogout }: Props) {
   return (
     <nav className="icon-rail">
       <button type="button" className="icon-rail-avatar" title="Профиль" onClick={() => onView("profile")}>
         {initial}
+        {approvals > 0 ? <span className="rail-dot" /> : null}
+      </button>
+      <button
+        type="button"
+        className={`icon-rail-btn ${view === "chats" ? "active" : ""}`}
+        title="Чаты"
+        aria-label="Чаты"
+        onClick={() => onView("chats")}
+      >
+        <svg viewBox="0 0 24 24" fill="currentColor">
+          <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z" />
+        </svg>
+        {unread > 0 ? <span className="rail-badge">{unread > 99 ? "99+" : unread}</span> : null}
       </button>
       <button
         type="button"

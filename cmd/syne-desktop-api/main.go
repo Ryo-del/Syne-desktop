@@ -23,6 +23,7 @@ type server struct {
 	token string
 	cl    *cloud.Client
 	jobs  *cloud.Jobs
+	hub   *hubService
 }
 
 func main() {
@@ -36,6 +37,7 @@ func main() {
 		host = "Компьютер"
 	}
 	s := &server{token: os.Getenv("SYNE_API_TOKEN"), cl: cloud.New(*server_, host), jobs: cloud.NewJobs()}
+	s.hub = &hubService{s: s}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
@@ -43,6 +45,7 @@ func main() {
 	mux.HandleFunc("/auth/login", s.handleLogin)
 	mux.HandleFunc("/auth/logout", s.handleLogout)
 	mux.HandleFunc("/cloud/", s.handleProxy)
+	s.hub.register(mux)
 	mux.HandleFunc("/transfers", s.handleTransfers)
 	mux.HandleFunc("/transfers/upload", s.handleUpload)
 	mux.HandleFunc("/transfers/download", s.handleDownload)
@@ -137,6 +140,14 @@ func (s *server) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 		st = s.state()
 	}
+	if u := s.cl.User(); st["signed_in"] == true && u != nil {
+		s.hub.start(u.ID)
+	}
+	s.hub.mu.Lock()
+	if reason := s.hub.signedOut; reason != "" && st["signed_in"] == false {
+		st["reason"] = reason
+	}
+	s.hub.mu.Unlock()
 	writeJSON(w, 200, st)
 }
 
@@ -157,10 +168,15 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	writeJSON(w, 200, s.state())
+	st := s.state()
+	if u := s.cl.User(); u != nil {
+		s.hub.start(u.ID)
+	}
+	writeJSON(w, 200, st)
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	s.hub.stop(true)
 	s.cl.Logout()
 	writeJSON(w, 200, s.state())
 }

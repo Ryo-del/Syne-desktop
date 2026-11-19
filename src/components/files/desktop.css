@@ -34,3 +34,5 @@
 .dk-device:last-child { border-bottom: 0; }
 .dk-device small { display: block; color: var(--ink-muted); font-size: 0.76rem; margin-top: 2px; }
 .dk-danger { color: var(--danger); }
+.rail-badge { position: absolute; top: 2px; right: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--danger); color: #fff; font-size: 0.68rem; font-weight: 700; display: grid; place-items: center; }
+.rail-dot { position: absolute; top: 0; right: 0; width: 12px; height: 12px; border-radius: 50%; background: var(--danger); border: 2px solid var(--bg); }
