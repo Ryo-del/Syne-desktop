@@ -11,6 +11,7 @@ export interface AuthState {
   signed_in: boolean;
   user?: User;
   offline?: boolean;
+  reason?: string;
 }
 
 export interface CloudFile {
@@ -62,4 +63,69 @@ export interface Transfer {
   error?: string;
 }
 
-export type View = "files" | "profile" | "settings";
+export type View = "chats" | "files" | "profile" | "settings";
+
+export interface AuthStateReason extends AuthState {
+  reason?: string;
+}
+
+export interface HubMessage {
+  id: string;
+  peer: string;
+  from: string;
+  text: string;
+  ts: number;
+  outgoing: boolean;
+  group_name?: string;
+}
+
+export interface HubDevice {
+  id: string;
+  name: string;
+  type: string;
+  trusted: boolean;
+  current: boolean;
+}
+
+export interface HubView {
+  state: "not_set_up" | "awaiting" | "ready" | "revoked";
+  login: string;
+  short_login: string;
+  school_name: string;
+  device_id: string;
+  pair_code: string;
+  request_status: string;
+  can_approve: boolean;
+  devices: HubDevice[];
+  names: Record<string, string> | null;
+  accounts: Record<string, string> | null;
+  messages: HubMessage[];
+  roster_key_id?: string;
+}
+
+export interface HubPending {
+  req: { request_id: string; name: string; type: string };
+  pair_code: string;
+  created_at: number;
+  expires_at: number;
+}
+
+export interface HubTrustError {
+  login: string;
+  kind: "reset" | "rollback" | "fork";
+  safety_number: string;
+}
+
+export interface HubGate {
+  status: "off" | "checking" | "open" | "waiting" | "denied" | "unreachable" | "revoked";
+  code?: string;
+  detail?: string;
+}
+
+export interface HubState {
+  gate: HubGate;
+  view?: HubView;
+  pending: HubPending[];
+  trust_error?: HubTrustError;
+  error?: string;
+}

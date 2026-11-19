@@ -1,0 +1,2 @@
+.cx-trust { padding: 12px 18px; background: var(--danger-dim); color: var(--ink); font-size: 0.86rem; display: flex; flex-direction: column; gap: 8px; user-select: text; }
+.cx-safety { font-family: "JetBrains Mono", monospace; font-size: 0.95rem; line-height: 1.7; padding: 10px 12px; border-radius: var(--radius-md); background: var(--field-bg, var(--surface)); user-select: text; word-break: break-word; }

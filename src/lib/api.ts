@@ -5,6 +5,7 @@ import type {
   CloudFile,
   Device,
   FileVersion,
+  HubState,
   Quota,
   Transfer,
   User,
@@ -145,3 +146,20 @@ export const downloadFile = (f: CloudFile, dest: string, version?: number) =>
 export const getTransfers = async () => (await json<{ transfers: Transfer[] }>("/transfers")).transfers;
 export const cancelTransfer = (id: string) => request(`/transfers/cancel?id=${id}`, send("POST"));
 export const clearTransfers = () => request("/transfers", send("DELETE"));
+
+// ── Key Hub (чаты): ключи и шифрование — в локальном сервисе ──
+export const hubState = () => json<HubState>("/hub/state");
+export const hubRecheck = () => json<HubState>("/hub/recheck", send("POST"));
+export const hubRetry = () => json<HubState>("/hub/retry", send("POST"));
+export const hubCancel = () => json<AuthState>("/hub/cancel", send("POST"));
+export const hubDisconnect = () => json<AuthState>("/hub/disconnect", send("POST"));
+export const hubSend = (peer: string, text: string) => json<HubState>("/hub/send", send("POST", { peer, text }));
+export const hubApprove = (requestId: string, trusted: boolean) =>
+  json<HubState>("/hub/approve", send("POST", { request_id: requestId, trusted }));
+export const hubReject = (requestId: string) => json<HubState>("/hub/reject", send("POST", { request_id: requestId }));
+export const hubPromote = (deviceId: string) => json<HubState>("/hub/promote", send("POST", { device_id: deviceId }));
+export const hubRevoke = (deviceId: string) => json<HubState>("/hub/revoke", send("POST", { device_id: deviceId }));
+export const hubAcceptPeer = (peer: string) => json<HubState>("/hub/accept-peer", send("POST", { peer }));
+export const hubRoster = (confirm: boolean) => json<HubState>("/hub/roster", send("POST", { confirm }));
+export const hubSafety = async (peer: string) =>
+  (await json<{ number: string }>(`/hub/safety${qs({ peer })}`)).number;
