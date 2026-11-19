@@ -1,0 +1,147 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
+
+import type {
+  AuthState,
+  CloudFile,
+  Device,
+  FileVersion,
+  Quota,
+  Transfer,
+  User,
+} from "../types";
+
+const API_BASE =
+  import.meta.env.VITE_API_BASE?.toString() ?? "http://127.0.0.1:38674";
+
+/** Ошибка локального сервиса или облака. code — машинный код (invalid_grant, exists...). */
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  constructor(message: string, status = 0, code = "") {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+let apiToken = "";
+const ready: Promise<void> = (async () => {
+  if (!isTauri()) return;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      apiToken = await invoke<string>("backend_token");
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+    }
+  }
+})();
+
+/** Слушатели «вход недействителен»: срабатывают на любом 401 от облака. */
+const signedOutListeners = new Set<() => void>();
+export function onSignedOut(fn: () => void) {
+  signedOutListeners.add(fn);
+  return () => {
+    signedOutListeners.delete(fn);
+  };
+}
+
+async function request(path: string, init: RequestInit = {}): Promise<Response> {
+  await ready;
+  const headers = new Headers(init.headers);
+  if (apiToken) headers.set("X-Syne-Token", apiToken);
+  let res: Response;
+  try {
+    res = await fetch(API_BASE + path, { ...init, headers });
+  } catch {
+    throw new ApiError("Локальный сервис Syne не отвечает. Перезапустите приложение.", 0, "backend_down");
+  }
+  if (res.status === 401 && !path.startsWith("/auth/")) {
+    signedOutListeners.forEach((fn) => fn());
+  }
+  if (!res.ok) {
+    let body: { error?: string; message?: string } = {};
+    try {
+      body = await res.json();
+    } catch {
+      /* тело не JSON */
+    }
+    throw new ApiError(body.message ?? `Ошибка (${res.status})`, res.status, body.error ?? "");
+  }
+  return res;
+}
+
+async function json<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await request(path, init);
+  return (await res.json()) as T;
+}
+
+function send(method: string, body?: unknown): RequestInit {
+  return body === undefined
+    ? { method }
+    : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+}
+
+const qs = (params: Record<string, string | undefined>) => {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined) p.set(k, v);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+};
+
+// ── вход ──
+export const authState = () => json<AuthState>("/auth/state");
+export const login = (username: string, password: string, server?: string) =>
+  json<AuthState>("/auth/login", send("POST", { username, password, server }));
+export const logout = () => json<AuthState>("/auth/logout", send("POST"));
+
+// ── аккаунт ──
+export const getMe = () => json<{ user: User; quota: Quota }>("/cloud/me");
+export const getDevices = async () => (await json<{ devices: Device[] }>("/cloud/me/devices")).devices;
+export const revokeDevice = (id: string) => request(`/cloud/me/devices/${id}`, send("DELETE"));
+export const getSettings = () => json<Record<string, unknown>>("/cloud/me/settings");
+export const putSettings = (s: Record<string, unknown>) =>
+  json<Record<string, unknown>>("/cloud/me/settings", send("PUT", s));
+
+// ── файлы ──
+export const listFiles = async (parentId: string | null) =>
+  (await json<{ files: CloudFile[] }>(`/cloud/files${qs({ parent_id: parentId ?? undefined })}`)).files;
+export const getFile = async (id: string) => (await json<{ file: CloudFile }>(`/cloud/files/${id}`)).file;
+export const createFolder = (parentId: string | null, name: string) =>
+  json<{ file: CloudFile }>("/cloud/files/folders", send("POST", { parent_id: parentId, name }));
+export const renameFile = (id: string, name: string) =>
+  json<{ file: CloudFile }>(`/cloud/files/${id}`, send("PATCH", { name }));
+export const moveFile = (id: string, parentId: string | null) =>
+  json<{ file: CloudFile }>(`/cloud/files/${id}`, send("PATCH", { parent_id: parentId }));
+export const trashFile = (id: string) => request(`/cloud/files/${id}`, send("DELETE"));
+export const listVersions = async (id: string) =>
+  (await json<{ versions: FileVersion[] }>(`/cloud/files/${id}/versions`)).versions;
+export const restoreVersion = (id: string, version: number) =>
+  request(`/cloud/files/${id}/versions/${version}/restore`, send("POST"));
+export const listTrash = async () =>
+  json<{ files: CloudFile[]; ttl_days: number }>("/cloud/trash");
+export const restoreTrash = (id: string) => request(`/cloud/trash/${id}/restore`, send("POST"));
+export const deleteTrash = (id: string) => request(`/cloud/trash/${id}`, send("DELETE"));
+export const searchFiles = async (q: string) =>
+  (await json<{ files: CloudFile[] }>(`/cloud/files/tree`)).files.filter(
+    (f) => !f.deleted_at && f.name.toLowerCase().includes(q.toLowerCase()),
+  );
+export const getQuota = async () => (await json<{ quota: Quota }>("/cloud/me")).quota;
+
+/** Содержимое файла (для просмотра фото и текста). */
+export async function fileBlob(id: string): Promise<Blob> {
+  return (await request(`/cloud/files/${id}/content?inline=1`)).blob();
+}
+
+// ── передачи (чанки, докачка и sha256 делает локальный сервис) ──
+export const uploadPaths = (paths: string[], parentId: string | null) =>
+  json<{ transfers: Transfer[] }>("/transfers/upload", send("POST", { paths, parent_id: parentId ?? "" }));
+export const downloadFile = (f: CloudFile, dest: string, version?: number) =>
+  json<{ transfers: Transfer[] }>(
+    "/transfers/download",
+    send("POST", { id: f.id, name: f.name, size: f.size, dest, version: version ? String(version) : "" }),
+  );
+export const getTransfers = async () => (await json<{ transfers: Transfer[] }>("/transfers")).transfers;
+export const cancelTransfer = (id: string) => request(`/transfers/cancel?id=${id}`, send("POST"));
+export const clearTransfers = () => request("/transfers", send("DELETE"));

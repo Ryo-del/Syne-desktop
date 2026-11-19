@@ -1,0 +1,36 @@
+/* Список файлов десктопного клиента. Токены и общие классы — из styles.css и files.css Study. */
+.dk-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; flex: none; }
+.dk-crumbs { display: flex; flex-wrap: wrap; align-items: center; min-width: 0; font-size: 0.95rem; }
+.dk-crumb { color: var(--ink-secondary); padding: 4px 6px; border-radius: 6px; font-weight: 600; }
+.dk-crumb:hover { background: var(--surface); color: var(--ink); }
+.dk-crumb.current { color: var(--ink); }
+.dk-sep { color: var(--ink-muted); }
+.dk-actions { display: flex; gap: 8px; flex: none; }
+.dk-primary { background: var(--accent); border-color: transparent; color: #fff; }
+.dk-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.dk-list { flex: 1; min-height: 0; overflow: auto; padding: 0 10px 8px; }
+.dk-list.drop-ok { box-shadow: inset 0 0 0 2px var(--accent); }
+.dk-row { display: grid; grid-template-columns: minmax(0, 1fr) 90px 190px; align-items: center; gap: 12px; height: 36px; padding: 0 12px; border-radius: 8px; font-size: 0.88rem; color: var(--ink); cursor: default; }
+.dk-row:not(.dk-row-head):hover { background: var(--surface); }
+.dk-row-head { height: 30px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); position: sticky; top: 0; background: var(--bg-tertiary); z-index: 1; }
+.dk-col { color: var(--ink-secondary); text-align: right; white-space: nowrap; }
+.dk-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 900px) { .dk-row { grid-template-columns: minmax(0, 1fr) 80px; } .dk-col.wide { display: none; } }
+.dk-transfers { flex: none; max-height: 140px; overflow: auto; padding: 8px 16px; border-top: 1px solid var(--line); background: var(--bg-secondary); display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; }
+.dk-transfer { display: flex; align-items: center; gap: 12px; }
+.dk-transfer .fx-name { flex: 1; }
+.dk-transfer-state { color: var(--ink-secondary); }
+.dk-modal-list { display: flex; flex-direction: column; gap: 2px; max-height: 50vh; overflow: auto; }
+.dk-modal-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 4px; font-size: 0.86rem; border-bottom: 1px solid var(--line); }
+.dk-modal-row small { display: block; color: var(--ink-muted); font-size: 0.76rem; margin-top: 2px; }
+.dk-modal-btns { display: flex; gap: 12px; flex: none; }
+.dk-page { height: 100%; overflow: auto; background: var(--bg-tertiary); padding: 28px 32px; user-select: text; }
+.dk-page h1 { margin: 0 0 20px; font-size: 1.3rem; letter-spacing: -0.02em; }
+.dk-card { max-width: 640px; margin-bottom: 16px; padding: 18px 20px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); }
+.dk-card h2 { margin: 0 0 12px; font-size: 0.76rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-secondary); }
+.dk-kv { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; font-size: 0.9rem; }
+.dk-kv span:first-child { color: var(--ink-secondary); }
+.dk-device { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 0.9rem; }
+.dk-device:last-child { border-bottom: 0; }
+.dk-device small { display: block; color: var(--ink-muted); font-size: 0.76rem; margin-top: 2px; }
+.dk-danger { color: var(--danger); }
