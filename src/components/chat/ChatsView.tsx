@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "../../lib/api";
-import type { HubMessage, HubState } from "../../types";
+import type { CloudChat, HubMessage, HubState } from "../../types";
+import CloudConversation from "./CloudConversation";
 import "./chats.css";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : "Что-то пошло не так");
@@ -29,9 +30,10 @@ interface Props {
   userId: string;
   hub: HubState;
   onState: (s: HubState) => void;
+  tick: number;
 }
 
-export default function ChatsView({ userId, hub, onState }: Props) {
+export default function ChatsView({ userId, hub, onState, tick }: Props) {
   const view = hub.view!;
   const names = view.names ?? {};
   const [selected, setSelected] = useState<string>("");
@@ -43,6 +45,11 @@ export default function ChatsView({ userId, hub, onState }: Props) {
   const [hidden, setHidden] = useState<Record<string, number>>(() => load(`syne.hidden.${userId}`, {}));
   const [safety, setSafety] = useState<string | null>(null);
   const stream = useRef<HTMLDivElement>(null);
+  const [cloudChats, setCloudChats] = useState<CloudChat[]>([]);
+  const loadChats = () => api.listChats().then(setCloudChats).catch(() => undefined);
+  useEffect(() => {
+    void loadChats();
+  }, [tick]);
 
   const byPeer = useMemo(() => {
     const m = new Map<string, HubMessage[]>();
@@ -73,6 +80,12 @@ export default function ChatsView({ userId, hub, onState }: Props) {
     [byPeer, hidden],
   );
 
+  const accounts = view.accounts ?? {};
+  const visibleCloud = cloudChats.filter((c) => c.is_group || !c.members.some((m) => m.id !== userId && accounts[m.id]));
+  const cloudTitle = (c: CloudChat) =>
+    c.is_group ? c.title || "Группа" : (c.members.find((m) => m.id !== userId)?.name ?? "Чат");
+  const cloudTs = (c: CloudChat) => Math.floor(new Date(c.last_message?.created_at ?? c.created_at).getTime() / 1000);
+  const selectedCloud = selected.startsWith("cloud:") ? cloudChats.find((c) => c.id === selected.slice(6)) : undefined;
   const q = query.trim().toLowerCase();
   const filtered = q ? peers.filter((p) => title(p).toLowerCase().includes(q)) : peers;
   // Новые собеседники из справочника школы (те, с кем ещё нет беседы).
@@ -171,6 +184,25 @@ export default function ChatsView({ userId, hub, onState }: Props) {
               </div>
             );
           })}
+          {visibleCloud
+            .filter((c) => !q || cloudTitle(c).toLowerCase().includes(q))
+            .sort((a, b) => cloudTs(b) - cloudTs(a))
+            .map((c) => (
+              <div key={c.id} className="chat-list-row">
+                <button className={`peer-card ${selected === `cloud:${c.id}` ? "active" : ""}`} onClick={() => setSelected(`cloud:${c.id}`)}>
+                  <div className="peer-card-avatar">{cloudTitle(c).slice(0, 1).toUpperCase()}</div>
+                  <div className="peer-card-info">
+                    <div className="peer-card-info-top">
+                      <strong>{cloudTitle(c)}</strong>
+                      {c.last_message ? <time>{time(cloudTs(c))}</time> : null}
+                    </div>
+                    <div className="peer-card-info-bottom">
+                      <span>{c.last_message ? (c.last_message.attachment ? c.last_message.attachment.name : c.last_message.body) : "Обычный чат"}</span>
+                    </div>
+                  </div>
+                </button>
+              </div>
+            ))}
           {people.map(([login, name]) => (
             <div key={login} className="chat-list-row">
               <button
@@ -192,14 +224,48 @@ export default function ChatsView({ userId, hub, onState }: Props) {
               </button>
             </div>
           ))}
-          {!filtered.length && !people.length ? (
-            <div className="fx-hint">{q ? "Никого не найдено." : "Бесед пока нет. Найдите собеседника по имени."}</div>
+          {q && !filtered.length && !people.length ? (
+            <div className="fx-hint">
+              Никого не найдено в справочнике.
+              <button
+                className="fx-link"
+                onClick={async () => {
+                  try {
+                    const u = await api.lookupUser(query.trim());
+                    const hubPeer = accounts[u.id];
+                    if (hubPeer) setSelected(hubPeer);
+                    else {
+                      const chat = await api.openChat(u.id);
+                      await loadChats();
+                      setSelected(`cloud:${chat.id}`);
+                    }
+                    setQuery("");
+                  } catch (e) {
+                    setError(errText(e));
+                  }
+                }}
+              >
+                Найти по точному логину
+              </button>
+            </div>
           ) : null}
+          {!q && !filtered.length && !visibleCloud.length ? <div className="fx-hint">Бесед пока нет. Найдите собеседника по имени.</div> : null}
         </div>
       </aside>
 
       <div className="main-chat main-chat-layout">
-        {selected ? (
+        {selectedCloud ? (
+          <>
+            <div className="chat-header">
+              <div className="chat-header-left">
+                <div className="chat-header-title">
+                  <span className="chat-header-name">{cloudTitle(selectedCloud)}</span>
+                </div>
+              </div>
+            </div>
+            <CloudConversation chat={selectedCloud} meId={userId} tick={tick} onActivity={() => void loadChats()} />
+          </>
+        ) : selected ? (
           <>
             <div className="chat-header">
               <div className="chat-header-left">

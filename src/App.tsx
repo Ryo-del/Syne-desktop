@@ -19,6 +19,7 @@ export default function App() {
   const [fatal, setFatal] = useState("");
   const [view, setView] = useState<View>("chats");
   const [quota, setQuota] = useState<Quota | null>(null);
+  const [tick, setTick] = useState(0);
 
   const signedIn = Boolean(auth?.signed_in && auth.user);
   const { state: hub, refresh: refreshHub, apply: applyHub } = useHub(signedIn);
@@ -39,6 +40,22 @@ export default function App() {
   useEffect(() => {
     if (signedIn && hub && hub.gate.status === "off") reload();
   }, [signedIn, hub, reload]);
+
+  // События облака (WebSocket): новые сообщения и изменения файлов.
+  useEffect(() => {
+    if (!signedIn) return;
+    let close: (() => void) | undefined;
+    let dead = false;
+    api
+      .openEvents((type) => {
+        if (type === "changes" || type === "open") setTick((n) => n + 1);
+      })
+      .then((fn) => (dead ? fn() : (close = fn)));
+    return () => {
+      dead = true;
+      close?.();
+    };
+  }, [signedIn]);
 
   const refreshQuota = useCallback(() => {
     api.getMe().then((m) => setQuota(m.quota)).catch(() => undefined);
@@ -68,7 +85,7 @@ export default function App() {
 
   const ready = hub?.view?.state === "ready";
   const unread = ready ? totalUnread(user.id, hub!.view!.messages) : 0;
-  const effective: View = view === "chats" && !ready ? "files" : view;
+  const effective: View = view === "chats" && !hub?.view ? "files" : view;
 
   return (
     <div className={`app-shell${effective === "chats" ? "" : " files-mode"}`}>
@@ -84,8 +101,8 @@ export default function App() {
           setView("chats");
         }}
       />
-      {effective === "chats" && hub ? <ChatsView userId={user.id} hub={hub} onState={applyHub} /> : null}
-      {effective === "files" ? <FilesView quota={quota} onQuota={refreshQuota} /> : null}
+      {effective === "chats" && hub ? <ChatsView userId={user.id} hub={hub} onState={applyHub} tick={tick} /> : null}
+      {effective === "files" ? <FilesView quota={quota} onQuota={refreshQuota} tick={tick} /> : null}
       {effective === "profile" ? <ProfileView user={user} quota={quota} hub={hub} onHub={applyHub} onSignedOut={setAuth} /> : null}
       {effective === "settings" ? <SettingsView server={auth.server} /> : null}
     </div>

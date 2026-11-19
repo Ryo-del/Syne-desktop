@@ -129,3 +129,34 @@ export interface HubState {
   trust_error?: HubTrustError;
   error?: string;
 }
+
+export interface CloudMember {
+  id: string;
+  login: string;
+  name: string;
+}
+
+export interface CloudAttachment {
+  sha256: string;
+  name: string;
+  size: number;
+}
+
+export interface CloudMessage {
+  id: number;
+  chat_id: string;
+  author_id: string;
+  client_id: string;
+  body: string;
+  attachment?: CloudAttachment | null;
+  created_at: string;
+}
+
+export interface CloudChat {
+  id: string;
+  title: string;
+  is_group: boolean;
+  members: CloudMember[];
+  created_at: string;
+  last_message?: CloudMessage | null;
+}

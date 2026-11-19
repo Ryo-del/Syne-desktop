@@ -20,11 +20,21 @@ type Modal =
   | { kind: "rename"; file: CloudFile }
   | { kind: "delete"; file: CloudFile }
   | { kind: "versions"; file: CloudFile }
-  | { kind: "trash" };
+  | { kind: "trash" }
+  | { kind: "edit"; file: CloudFile };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : "Что-то пошло не так");
 
-export default function FilesView({ quota, onQuota }: { quota: Quota | null; onQuota: () => void }) {
+const TEXT_EXT = new Set(["txt","md","markdown","json","yaml","yml","toml","ini","cfg","conf","env","log","csv","tsv","xml","html","htm","css","scss","js","jsx","ts","tsx","mjs","py","go","rs","java","kt","c","h","cpp","hpp","cs","php","rb","sh","bat","ps1","sql","swift","lua","gitignore","dockerfile","makefile"]);
+const MAX_TEXT = 1 << 20;
+function isText(f: CloudFile): boolean {
+  if (f.is_dir || f.size > MAX_TEXT) return false;
+  const name = f.name.toLowerCase();
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : name;
+  return TEXT_EXT.has(ext);
+}
+
+export default function FilesView({ quota, onQuota, tick }: { quota: Quota | null; onQuota: () => void; tick: number }) {
   const [path, setPath] = useState<Crumb[]>([{ id: null, name: "Облако" }]);
   const [files, setFiles] = useState<CloudFile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,6 +65,15 @@ export default function FilesView({ quota, onQuota }: { quota: Quota | null; onQ
     setLoading(true);
     void load();
   }, [here.id, load]);
+
+  // Изменение на другом устройстве (WebSocket облака): обновляем список и место.
+  useEffect(() => {
+    if (tick > 0) {
+      void load();
+      onQuota();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
 
   // Поиск: по всему дереву, с небольшой задержкой.
   useEffect(() => {
@@ -158,6 +177,8 @@ export default function FilesView({ quota, onQuota }: { quota: Quota | null; onQ
     if (f.is_dir) {
       setQuery("");
       setPath((p) => [...p, { id: f.id, name: f.name }]);
+    } else if (isText(f)) {
+      setModal({ kind: "edit", file: f });
     } else {
       void download(f);
     }
@@ -308,8 +329,13 @@ export default function FilesView({ quota, onQuota }: { quota: Quota | null; onQ
       {menu ? (
         <div className="fx-menu" style={{ left: menu.x, top: menu.y }} onClick={(e) => e.stopPropagation()}>
           <button className="fx-menu-item" onClick={() => { openFile(menu.file); setMenu(null); }}>
-            {menu.file.is_dir ? "Открыть" : "Скачать…"}
+            {menu.file.is_dir || isText(menu.file) ? "Открыть" : "Скачать…"}
           </button>
+          {isText(menu.file) ? (
+            <button className="fx-menu-item" onClick={() => { void download(menu.file); setMenu(null); }}>
+              Скачать…
+            </button>
+          ) : null}
           {!menu.file.is_dir ? (
             <button className="fx-menu-item" onClick={() => { setModal({ kind: "versions", file: menu.file }); setMenu(null); }}>
               Версии
@@ -357,6 +383,16 @@ export default function FilesView({ quota, onQuota }: { quota: Quota | null; onQ
           onClose={() => setModal(null)}
           onDownload={(v) => void download(modal.file, v)}
           onRestored={() => void load()}
+        />
+      ) : null}
+      {modal?.kind === "edit" ? (
+        <EditorDialog
+          file={modal.file}
+          onClose={() => setModal(null)}
+          onSaved={() => {
+            void load();
+            onQuota();
+          }}
         />
       ) : null}
       {modal?.kind === "trash" ? <TrashDialog onClose={() => setModal(null)} onChanged={() => { void load(); onQuota(); }} /> : null}
@@ -551,5 +587,98 @@ function TrashDialog({ onClose, onChanged }: { onClose: () => void; onChanged: (
         </button>
       </div>
     </Backdrop>
+  );
+}
+
+function EditorDialog({ file, onClose, onSaved }: { file: CloudFile; onClose: () => void; onSaved: () => void }) {
+  const [original, setOriginal] = useState<string | null>(null);
+  const [text, setText] = useState("");
+  const [current, setCurrent] = useState(file);
+  const [note, setNote] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .readText(file.id)
+      .then((s) => {
+        setOriginal(s);
+        setText(s);
+      })
+      .catch((e) => setError(errText(e)));
+  }, [file.id]);
+
+  const dirty = original !== null && text !== original;
+
+  async function save() {
+    setBusy(true);
+    setError("");
+    try {
+      const r = await api.writeText(current, text);
+      if (r.conflict) {
+        setNote("Файл успели изменить на другом устройстве. Ваш текст сохранён отдельной копией «… (конфликт …)» рядом с ним.");
+        setOriginal(text);
+      } else {
+        if (r.file) setCurrent(r.file);
+        setOriginal(text);
+        setNote(r.unchanged ? "Изменений нет." : "Сохранено.");
+      }
+      onSaved();
+    } catch (e) {
+      setError(errText(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const close = () => {
+    if (!dirty || window.confirm("Закрыть без сохранения? Правки пропадут.")) onClose();
+  };
+
+  return (
+    <div className="fx-modal-backdrop" onMouseDown={close}>
+      <div className="fx-modal dk-editor" onMouseDown={(e) => e.stopPropagation()}>
+        <div className="fx-modal-title">
+          {file.name}
+          {dirty ? " •" : ""}
+        </div>
+        {error ? <div className="fx-modal-error">{error}</div> : null}
+        {note ? <div className="fx-modal-text">{note}</div> : null}
+        {original === null && !error ? <div className="fx-modal-text">Загрузка…</div> : null}
+        {original !== null ? (
+          <textarea
+            className="dk-editor-area"
+            spellCheck={false}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setNote("");
+            }}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+                e.preventDefault();
+                if (dirty && !busy) void save();
+              }
+              if (e.key === "Tab") {
+                e.preventDefault();
+                const el = e.currentTarget;
+                const { selectionStart: a, selectionEnd: b } = el;
+                setText(text.slice(0, a) + "  " + text.slice(b));
+                requestAnimationFrame(() => el.setSelectionRange(a + 2, a + 2));
+              }
+            }}
+          />
+        ) : null}
+        <div className="fx-modal-actions">
+          <span className="fx-modal-count">Ctrl+S — сохранить</span>
+          <button className="fx-btn" onClick={close}>
+            Закрыть
+          </button>
+          <button className="fx-btn dk-primary" disabled={!dirty || busy} onClick={() => void save()}>
+            Сохранить
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

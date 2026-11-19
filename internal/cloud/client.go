@@ -274,3 +274,14 @@ func (c *Client) Do(method, path, rawQuery string, header http.Header, body io.R
 	}
 	return nil, ErrUnauthorized
 }
+
+// Token возвращает действующий токен доступа (обновляет при необходимости): для WebSocket.
+func (c *Client) Token() (string, error) { return c.token() }
+
+// UseMemoryStore хранит refresh-токен в памяти вместо связки ключей (для тестов других пакетов).
+func UseMemoryStore() {
+	var mu sync.Mutex
+	val := ""
+	loadRefresh = func() string { mu.Lock(); defer mu.Unlock(); return val }
+	saveRefresh = func(v string) { mu.Lock(); val = v; mu.Unlock() }
+}
