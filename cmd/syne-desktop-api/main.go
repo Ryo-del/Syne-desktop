@@ -219,13 +219,20 @@ func (s *server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Paths    []string `json:"paths"`
 		ParentID string   `json:"parent_id"`
+		// Replace: заменить содержимое существующего файла новой версией (для одного пути).
+		ReplaceID      string `json:"replace_id"`
+		ReplaceVersion int    `json:"replace_version"`
 	}
 	if r.Method != http.MethodPost || json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in) != nil {
 		http.Error(w, "bad request", 400)
 		return
 	}
 	for _, p := range in.Paths {
-		s.cl.Upload(s.jobs, p, in.ParentID)
+		if in.ReplaceID != "" {
+			s.cl.UploadVersion(s.jobs, p, in.ReplaceID, in.ReplaceVersion)
+		} else {
+			s.cl.UploadTree(s.jobs, p, in.ParentID)
+		}
 	}
 	writeJSON(w, 202, map[string]any{"transfers": s.jobs.Snapshot()})
 }

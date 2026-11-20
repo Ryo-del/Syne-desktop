@@ -1,12 +1,12 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Syne",
+  "productName": "Syne Desktop",
   "version": "0.1.0",
   "identifier": "ru.syne-network.desktop",
   "build": {
     "beforeDevCommand": "npm run build:sidecar && npm run dev",
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1421",
     "frontendDist": "../dist"
   },
   "bundle": {
@@ -37,7 +37,7 @@
     },
     "windows": [
       {
-        "title": "Syne",
+        "title": "Syne Desktop",
         "width": 1520,
         "height": 920,
         "minWidth": 1080,
@@ -46,5 +46,6 @@
         "devtools": false
       }
     ]
-  }
+  },
+  "mainBinaryName": "Syne Desktop"
 }

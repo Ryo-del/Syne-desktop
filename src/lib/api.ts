@@ -42,6 +42,11 @@ const ready: Promise<void> = (async () => {
   }
 })();
 
+export const getApiBase = () => API_BASE;
+export const whenApiReady = () => ready;
+/** Заголовки для запросов к локальному сервису вне request() (например, fetch с keepalive). */
+export const authHeaders = (): Record<string, string> => (apiToken ? { "X-Syne-Token": apiToken } : {});
+
 /** Слушатели «вход недействителен»: срабатывают на любом 401 от облака. */
 const signedOutListeners = new Set<() => void>();
 export function onSignedOut(fn: () => void) {
@@ -51,7 +56,7 @@ export function onSignedOut(fn: () => void) {
   };
 }
 
-async function request(path: string, init: RequestInit = {}): Promise<Response> {
+export async function request(path: string, init: RequestInit = {}): Promise<Response> {
   await ready;
   const headers = new Headers(init.headers);
   if (apiToken) headers.set("X-Syne-Token", apiToken);
@@ -131,6 +136,7 @@ export const searchFiles = async (q: string) =>
   (await json<{ files: CloudFile[] }>(`/cloud/files/tree`)).files.filter(
     (f) => !f.deleted_at && f.name.toLowerCase().includes(q.toLowerCase()),
   );
+export const listTree = async () => (await json<{ files: CloudFile[] }>("/cloud/files/tree")).files;
 export const getQuota = async () => (await json<{ quota: Quota }>("/cloud/me")).quota;
 
 /** Содержимое файла (для просмотра фото и текста). */
@@ -139,8 +145,12 @@ export async function fileBlob(id: string): Promise<Blob> {
 }
 
 // ── передачи (чанки, докачка и sha256 делает локальный сервис) ──
+export type TransferJob = Transfer;
 export const uploadPaths = (paths: string[], parentId: string | null) =>
   json<{ transfers: Transfer[] }>("/transfers/upload", send("POST", { paths, parent_id: parentId ?? "" }));
+/** Новая версия существующего файла (замена при конфликте имён). */
+export const uploadReplace = (path: string, fileId: string, version: number) =>
+  json<{ transfers: Transfer[] }>("/transfers/upload", send("POST", { paths: [path], replace_id: fileId, replace_version: version }));
 export const downloadFile = (f: CloudFile, dest: string, version?: number) =>
   json<{ transfers: Transfer[] }>(
     "/transfers/download",
@@ -184,6 +194,14 @@ export async function sendAttachment(chatId: string, file: File, body = ""): Pro
 }
 export const chatAttachment = async (chatId: string, messageId: number) =>
   (await request(`/cloud/chats/${chatId}/messages/${messageId}/attachment`)).blob();
+
+/** Создаёт файл (до 32 МБ) одним запросом: пустой, копия или новый. */
+export async function createFile(parentId: string | null, name: string, body: Blob) {
+  return json<{ file?: CloudFile; conflict?: boolean }>(
+    `/cloud/files/content${qs({ parent_id: parentId ?? undefined, name })}`,
+    { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body },
+  );
+}
 
 // ── текстовые файлы ──
 export async function readText(id: string): Promise<string> {
