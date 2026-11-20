@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import * as api from "../lib/api";
 import type { ChatSummary, CloudChat, CloudMessage, HubMessage, HubState, UIMessage } from "../types";
+import { parseAttachment } from "../files/attachment";
 import { setChatList } from "./store";
 
 export const HUB = "hub:";
@@ -108,6 +109,29 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
   const toUi = useCallback(
     (m: HubMessage): UIMessage => {
       const chat_id = HUB + m.peer;
+      // Файл из Syne Study приходит текстом с меткой [[syne-file:…]]: показываем карточку, а не сырой текст.
+      const legacy = m.att ? null : parseAttachment(m.text);
+      if (!m.att && m.text.includes("[[syne-file:")) {
+        const caption = m.text.split("\n").slice(1).filter((l) => !l.includes("[[syne-file:")).join("\n").trim();
+        return {
+          message_id: m.id,
+          chat_id,
+          from: m.from,
+          from_name: names[m.from] ?? "Участник",
+          text: legacy ? caption : "",
+          timestamp: m.ts * 1000,
+          direction: m.outgoing ? "outgoing" : "incoming",
+          att: {
+            source: "hub",
+            id: m.id,
+            chat_id,
+            kind: legacy?.kind ?? "file",
+            name: legacy?.name ?? "Вложение",
+            size: legacy?.size ?? 0,
+            card_only: true,
+          },
+        };
+      }
       return {
         message_id: m.id,
         chat_id,

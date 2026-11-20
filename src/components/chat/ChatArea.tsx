@@ -187,7 +187,7 @@ export default function ChatArea({
                           <Attachment
                             att={message.att}
                             outgoing={message.direction === "outgoing"}
-                            cardOnly={!!selectedChat.no_cloud}
+                            cardOnly={!!selectedChat.no_cloud || !!message.att.card_only}
                             onNotify={onNotify}
                           />
                         ) : null}

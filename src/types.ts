@@ -192,6 +192,8 @@ export type MessageAttachment = {
   name: string;
   size: number;
   thumb?: string; // base64 JPEG (только Key Hub)
+  /** Метка файла из Syne Study в тексте: только значок, имя и размер. */
+  card_only?: boolean;
 };
 
 export type ChatSummary = {
