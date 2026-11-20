@@ -9,6 +9,8 @@ import Lightbox from "./Lightbox";
 interface Props {
   att: MessageAttachment;
   outgoing: boolean;
+  /** Собеседник без Syne Cloud: только значок и название, без скачивания и просмотра. */
+  cardOnly?: boolean;
   onNotify: (msg: string, kind?: "info" | "error") => void;
 }
 
@@ -21,7 +23,7 @@ async function fetchBlob(att: MessageAttachment): Promise<Blob> {
 }
 
 /** Вложение сообщения: фото (миниатюра и просмотр) или файловая карточка. */
-export default function Attachment({ att, onNotify }: Props) {
+export default function Attachment({ att, cardOnly, onNotify }: Props) {
   const [url, setUrl] = useState<string | null>(null);
   const [zoom, setZoom] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -77,6 +79,18 @@ export default function Attachment({ att, onNotify }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (cardOnly) {
+    return (
+      <div className="file-card" title="Открывается в Syne Study">
+        <img className="file-card-icon" src={iconUrl(isPhoto ? "photo.jpg" : att.name, false)} alt="" draggable={false} />
+        <div className="file-card-main">
+          <div className="file-card-name">{isPhoto && (!att.name || att.name === "Вложение") ? "Фото" : att.name}</div>
+          <div className="file-card-meta">{att.size > 0 ? formatBytes(att.size) : "Открывается в Syne Study"}</div>
+        </div>
+      </div>
+    );
   }
 
   if (isPhoto && thumb) {

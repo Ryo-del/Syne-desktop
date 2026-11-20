@@ -123,7 +123,7 @@ export function SearchBar({ open, mode, target, focusToken, onOpen, onClose, onO
   }
 
   function toggle(c: ChatSummary) {
-    if (!c.peer_user_id) return;
+    if (!c.peer_user_id || c.no_cloud) return;
     setPicked((cur) => {
       const next = new Set(cur);
       if (next.has(c.chat_id)) next.delete(c.chat_id);
@@ -239,7 +239,7 @@ export function SearchBar({ open, mode, target, focusToken, onOpen, onClose, onO
               {error && <div className="fx-hint">{error}</div>}
               {recipients.length === 0 && !error && <div className="fx-hint">Нет подходящих чатов</div>}
               {recipients.map((c, i) => {
-                const can = !!c.peer_user_id;
+                const can = !!c.peer_user_id && !c.no_cloud;
                 return (
                   <label
                     key={c.chat_id}
@@ -249,7 +249,7 @@ export function SearchBar({ open, mode, target, focusToken, onOpen, onClose, onO
                     <input type="checkbox" disabled={!can} checked={picked.has(c.chat_id)} onChange={() => toggle(c)} />
                     <div className="fx-result-main">
                       <div className="fx-result-name">{c.title || c.peer_id}</div>
-                      {!can && <div className="fx-result-path">нет аккаунта, файл отправить нельзя</div>}
+                      {!can && <div className="fx-result-path">файл этому человеку отправить нельзя</div>}
                     </div>
                   </label>
                 );

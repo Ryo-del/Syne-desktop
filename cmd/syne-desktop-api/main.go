@@ -181,7 +181,9 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	s.hub.stop(true)
+	// Ключ устройства и история защищённых чатов остаются на диске: при следующем входе
+	// того же пользователя переписка на месте. Стираются они только при отзыве/отключении.
+	s.hub.stop(false)
 	s.cl.Logout()
 	writeJSON(w, 200, s.state())
 }

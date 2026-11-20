@@ -47,11 +47,15 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
   const hubView = hub?.view && hub.view.state === "ready" ? hub.view : null;
   const names = hubView?.names ?? {};
   const accounts = hubView?.accounts ?? {};
+  const selfLogin = hubView?.login ?? "";
+  const cloudPeople = useMemo(() => new Set(Object.values(accounts)), [accounts]);
 
   const readKey = `syne-desktop.read.${userId}`;
   const hiddenKey = `syne-desktop.hidden.${userId}`;
   const [read, setRead] = useState<Record<string, number>>(() => load(readKey, {}));
   const [hidden, setHidden] = useState<Record<string, number>>(() => load(hiddenKey, {}));
+  const blockedKey = `syne-desktop.blocked.${userId}`;
+  const [blocked, setBlocked] = useState<Record<string, string>>(() => load(blockedKey, {}));
   const [drafts, setDrafts] = useState<Record<string, string>>({}); // chat_id → заголовок
   const [cloudChats, setCloudChats] = useState<CloudChat[]>([]);
   const [cloudMessages, setCloudMessages] = useState<Record<string, CloudMessage[]>>({});
@@ -160,6 +164,7 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
   const chats = useMemo<ChatSummary[]>(() => {
     const out: ChatSummary[] = [];
     for (const [peer, list] of hubByPeer) {
+      if (peer === selfLogin || blocked[peer] !== undefined) continue;
       const id = HUB + peer;
       const last = list[list.length - 1];
       const ts = last ? last.ts * 1000 : 0;
@@ -176,11 +181,15 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
         peer_user_id: peer.startsWith("group:") ? undefined : peer,
         is_group: peer.startsWith("group:"),
         secure: true,
+        no_cloud: !peer.startsWith("group:") && !cloudPeople.has(peer),
+        block_key: peer.startsWith("group:") ? undefined : peer,
       });
     }
     for (const c of cloudChats) {
       // Беседа с человеком, у которого есть Key Hub, всегда идёт через Hub.
       if (!c.is_group && c.members.some((m) => m.id !== userId && accounts[m.id])) continue;
+      const other0 = c.members.find((m) => m.id !== userId);
+      if (!c.is_group && (!other0 || blocked[other0.id] !== undefined)) continue; // чат с самим собой и заблокированные
       const id = CLOUD + c.id;
       const ts = iso(c.last_message?.created_at ?? c.created_at);
       if (hidden[id] !== undefined && ts <= hidden[id]) continue;
@@ -199,6 +208,7 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
         peer_user_id: c.is_group ? undefined : other?.id,
         is_group: c.is_group,
         secure: false,
+        block_key: c.is_group ? undefined : other?.id,
       });
     }
     for (const [id, title] of Object.entries(drafts)) {
@@ -212,6 +222,8 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
           unread_count: 0,
           peer_user_id: id.startsWith(HUB) ? id.slice(HUB.length) : undefined,
           secure: id.startsWith(HUB),
+          no_cloud: id.startsWith(HUB) && !cloudPeople.has(id.slice(HUB.length)),
+          block_key: id.startsWith(HUB) ? id.slice(HUB.length) : undefined,
         });
       }
     }
@@ -220,7 +232,7 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
       .map((c) => (c.chat_id === selectedId ? { ...c, unread_count: 0 } : c))
       .sort((a, b) => b.last_timestamp - a.last_timestamp);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hubByPeer, cloudChats, hidden, read, drafts, selectedId, hubTitle, cloudTitle, accounts, userId]);
+  }, [hubByPeer, cloudChats, hidden, read, drafts, selectedId, hubTitle, cloudTitle, accounts, userId, blocked, selfLogin, cloudPeople]);
 
   useEffect(() => setChatList(chats), [chats]);
 
@@ -246,7 +258,7 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
     }
     for (const m of hubView.messages) {
       if (seen.current.has(m.id)) continue;
-      if (!m.outgoing) {
+      if (!m.outgoing && blocked[m.peer] === undefined && blocked[m.from] === undefined) {
         const ui = toUi(m);
         onIncoming(hubTitle(m.peer), previewOf(ui).replace(/^Вы: /, ""));
       }
@@ -324,7 +336,13 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
   /** Открывает беседу с человеком: Key Hub, если у него есть Hub, иначе обычный облачный чат. */
   const openWith = useCallback(
     async (user: { id?: string; login: string; name: string }): Promise<string> => {
+      if ((user.id && user.id === userId) || (selfLogin && user.login === selfLogin)) {
+        throw new Error("Нельзя написать самому себе.");
+      }
       const hubPeer = (user.id && accounts[user.id]) || (names[user.login] ? user.login : "");
+      if (blocked[hubPeer] !== undefined || (user.id && blocked[user.id] !== undefined) || blocked[user.login] !== undefined) {
+        throw new Error("Пользователь заблокирован. Разблокируйте его в поиске.");
+      }
       if (hubPeer) {
         const id = HUB + hubPeer;
         setHidden((h) => {
@@ -348,8 +366,30 @@ export function useChats({ userId, hub, applyHub, tick, selectedId, onIncoming, 
       });
       return id;
     },
-    [accounts, names, refreshCloud, hiddenKey],
+    [accounts, names, refreshCloud, hiddenKey, blocked, selfLogin, userId],
   );
 
-  return { chats, messages, send, sendPaths, sendBlob, hide, openWith, names };
+  const block = useCallback(
+    (key: string, name: string) => {
+      setBlocked((cur) => {
+        const next = { ...cur, [key]: name };
+        save(blockedKey, next);
+        return next;
+      });
+    },
+    [blockedKey],
+  );
+
+  const unblock = useCallback(
+    (key: string) => {
+      setBlocked((cur) => {
+        const { [key]: _gone, ...rest } = cur;
+        save(blockedKey, rest);
+        return rest;
+      });
+    },
+    [blockedKey],
+  );
+
+  return { chats, messages, send, sendPaths, sendBlob, hide, openWith, names, blocked, block, unblock };
 }

@@ -206,6 +206,10 @@ export type ChatSummary = {
   peer_user_id?: string;
   is_group?: boolean;
   secure: boolean;
+  /** Собеседник без Syne Cloud (только Syne Study): файлы и фото в чат не отправляются. */
+  no_cloud?: boolean;
+  /** Ключ для блокировки: логин Hub или id облака. */
+  block_key?: string;
 };
 
 export type UIMessage = {

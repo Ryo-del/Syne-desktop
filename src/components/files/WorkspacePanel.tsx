@@ -50,7 +50,7 @@ function changeTone(status: string) {
   return "idle";
 }
 
-export function WorkspacePanel({ onClose, notify, deleteAfterUpload = false }: { onClose: () => void; notify: (message: string, kind?: "info" | "error") => void; deleteAfterUpload?: boolean }) {
+export function WorkspacePanel({ onClose, notify, onUploaded, deleteAfterUpload = false }: { onClose: () => void; onUploaded?: () => void; notify: (message: string, kind?: "info" | "error") => void; deleteAfterUpload?: boolean }) {
   const [source, setSource] = useState<Source>("mine");
   const [location, setLocation] = useState<Location>({ label: "Моя папка", owner: "", path: "" });
   const [rows, setRows] = useState<FileEntry[]>([]);
@@ -189,8 +189,6 @@ export function WorkspacePanel({ onClose, notify, deleteAfterUpload = false }: {
       setChanges(diff);
       const pending = diff.filter((change) => change.status === "Новый" || change.status === "Изменён");
       if (!pending.length) { setStatus("Готова к работе"); notify("Новых или изменённых файлов нет", "info"); return; }
-      const preview = diff.map((change) => `${change.status}: ${change.path}${change.bytes ? ` (${formatBytes(change.bytes)})` : ""}`).join("\n");
-      if (!window.confirm(`Выгрузить изменения в «Мою папку»:\n\n${preview}\n\nСкачанные файлы будут заменены на сервере, если их версия не менялась. Новые файлы получат свободное имя. Удалённые локально файлы на сервере останутся.`)) { setStatus("Готова к работе"); return; }
       const failures: { path: string; error: string }[] = [];
       let uploaded = 0;
       for (const change of pending) {
@@ -225,6 +223,7 @@ export function WorkspacePanel({ onClose, notify, deleteAfterUpload = false }: {
       setUploadResult(result);
       setStatus(failures.length ? "Ожидает загрузки" : "Загружено");
       await refreshChanges();
+      if (uploaded > 0) { onUploaded?.(); await load(location, source); }
       notify(`Загружено файлов: ${uploaded}${failures.length ? `; ошибок: ${failures.length}` : ""}`, failures.length ? "error" : "info");
     } catch (error) { setStatus("Ожидает загрузки"); notify(String(error)); }
     finally { setBusy(false); }

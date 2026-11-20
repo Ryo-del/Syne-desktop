@@ -57,7 +57,8 @@ export default function ChatArea({
   chatRef.current = selectedChat;
 
   const isHub = !!selectedChat && selectedChat.chat_id.startsWith("hub:");
-  const canAttach = !!selectedChat && (isHub || selectedChat.chat_id.startsWith("cloud:"));
+  // С человеком без Syne Cloud (Study) файлы и фото в чат не отправляются.
+  const canAttach = !!selectedChat && !selectedChat.no_cloud && (isHub || selectedChat.chat_id.startsWith("cloud:"));
 
   function target(): ChatTarget | null {
     const c = chatRef.current;
@@ -127,7 +128,7 @@ export default function ChatArea({
       const r = el.getBoundingClientRect();
       const inside = e.x >= r.left && e.x <= r.right && e.y >= r.top && e.y <= r.bottom;
       const c = chatRef.current;
-      const ok = inside && !!c && c.chat_id.startsWith("hub:");
+      const ok = inside && !!c && c.chat_id.startsWith("hub:") && !c.no_cloud;
       if (e.phase === "drop") {
         setDropActive(false);
         if (ok) setPendingDrop(e.paths);
@@ -183,7 +184,12 @@ export default function ChatArea({
                         className={`msg-bubble ${message.direction}${message.att ? " has-attachment" : ""}${message.att?.kind === "photo" ? " media" : ""}`}
                       >
                         {message.att ? (
-                          <Attachment att={message.att} outgoing={message.direction === "outgoing"} onNotify={onNotify} />
+                          <Attachment
+                            att={message.att}
+                            outgoing={message.direction === "outgoing"}
+                            cardOnly={!!selectedChat.no_cloud}
+                            onNotify={onNotify}
+                          />
                         ) : null}
                         {message.text ? <p className="msg-text">{message.text}</p> : null}
 

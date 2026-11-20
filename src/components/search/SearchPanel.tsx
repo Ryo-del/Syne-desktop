@@ -13,6 +13,9 @@ interface SearchPanelProps {
   /** Справочник школы: логин → имя (из Key Hub). */
   directory: Record<string, string>;
   selfLogin: string;
+  /** Заблокированные: ключ (логин или id) → имя. */
+  blocked: Record<string, string>;
+  onUnblock: (key: string) => void;
   query: string;
   onQueryChange: (value: string) => void;
   getAvatar: (label: string) => string;
@@ -24,6 +27,8 @@ interface SearchPanelProps {
 export default function SearchPanel({
   directory,
   selfLogin,
+  blocked,
+  onUnblock,
   query,
   onQueryChange,
   getAvatar,
@@ -50,6 +55,7 @@ export default function SearchPanel({
     setLooking(true);
     try {
       const u = await api.lookupUser(login);
+      if (u.login === selfLogin) throw new Error("Нельзя написать самому себе.");
       setExact({ id: u.id, login: u.login, name: u.name });
     } catch (e) {
       setExact(null);
@@ -87,17 +93,25 @@ export default function SearchPanel({
       </div>
 
       <div className="nearby-list">
-        {rows.map((user) => (
-          <div className="nearby-row" key={user.login}>
-            <button type="button" className="nearby-main" onClick={() => onOpen(user)}>
-              <span className="nearby-avatar">{getAvatar(user.name || user.login)}</span>
-              <span className="nearby-info">
-                <span className="nearby-name">{user.name || user.login}</span>
-                <span className="nearby-id">{user.login}</span>
-              </span>
-            </button>
-          </div>
-        ))}
+        {rows.map((user) => {
+          const bKey = blocked[user.login] !== undefined ? user.login : user.id && blocked[user.id] !== undefined ? user.id : "";
+          return (
+            <div className="nearby-row" key={user.login}>
+              <button type="button" className="nearby-main" onClick={() => (bKey ? undefined : onOpen(user))}>
+                <span className="nearby-avatar">{getAvatar(user.name || user.login)}</span>
+                <span className="nearby-info">
+                  <span className="nearby-name">{user.name || user.login}</span>
+                  {bKey ? <span className="nearby-id">Заблокирован</span> : null}
+                </span>
+              </button>
+              {bKey ? (
+                <button type="button" className="fx-link" onClick={() => onUnblock(bKey)}>
+                  Разблокировать
+                </button>
+              ) : null}
+            </div>
+          );
+        })}
 
         {query.trim() && !rows.length ? (
           <div className="nearby-empty">

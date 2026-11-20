@@ -705,7 +705,7 @@ export function Files({ deleteAfterUpload = false }: { deleteAfterUpload?: boole
         </div>
 
         <div className="fx-main">
-          {workspaceOpen ? <WorkspacePanel onClose={() => setWorkspaceOpen(false)} notify={notify} deleteAfterUpload={deleteAfterUpload} /> : <>
+          {workspaceOpen ? <WorkspacePanel onClose={() => setWorkspaceOpen(false)} onUploaded={() => setRefreshSignal((n) => n + 1)} notify={notify} deleteAfterUpload={deleteAfterUpload} /> : <>
           <div className={`fx-explorer ${full ? "full" : "sized"}`} style={full ? undefined : { width }}>
             <Explorer paneId={null} ui={ui} update={update} />
             <div

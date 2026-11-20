@@ -97,7 +97,6 @@ export default function App() {
   const [settings, setSettings] = useState<AccountSettings>(DEFAULT_ACCOUNT_SETTINGS);
   const [selectedAppIcon, setSelectedAppIcon] = useState<AppIconId>("blue");
   const [emojiPickerTarget, setEmojiPickerTarget] = useState<"self" | "peer" | null>(null);
-  const [safety, setSafety] = useState<string | null>(null);
   const [systemTheme, setSystemTheme] = useState<"light" | "dark">(() =>
     window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark",
   );
@@ -345,6 +344,15 @@ export default function App() {
     if (selectedChatIdRef.current === chatId) setSelectedChatId("");
   }
 
+  function handleBlockChat(chatId: string) {
+    setChatContextMenu(null);
+    const chat = chats.find((c) => c.chat_id === chatId);
+    if (!chat?.block_key) return;
+    chatsApi.block(chat.block_key, chat.title);
+    if (selectedChatIdRef.current === chatId) setSelectedChatId("");
+    showToast(`«${chat.title}» заблокирован. Разблокировать можно в поиске.`, "info");
+  }
+
   async function handleLogout() {
     try {
       await saveQueueRef.current;
@@ -395,15 +403,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signedIn, settings.autoLogoutEnabled, settings.autoLogoutHours]);
 
-  async function showSafetyNumber() {
-    if (!selectedChat || !selectedChat.chat_id.startsWith(HUB) || selectedChat.is_group) return;
-    try {
-      setSafety(await api.hubSafety(selectedChat.chat_id.slice(HUB.length)));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Не удалось получить номер безопасности");
-    }
-  }
-
   // ── экраны до входа ──
   if (fatal) return <div className="fx-loading">{fatal}</div>;
   if (!auth) return <div className="fx-loading">Запуск…</div>;
@@ -435,7 +434,7 @@ export default function App() {
   const banner = showTrust && trust ? (
     <div className="cx-trust">
       <strong>{trust.kind === "reset" ? "У собеседника сменилась идентичность." : "Реестр устройств собеседника изменился."}</strong>{" "}
-      Сверьте номер безопасности с ним лично или по другому каналу: {trust.safety_number}
+      Убедитесь, что это действительно он, и только потом продолжайте.
       <div>
         <button
           className="fx-btn"
@@ -447,18 +446,11 @@ export default function App() {
             }
           }}
         >
-          Номер совпал — продолжить
+          Это он — продолжить
         </button>
       </div>
     </div>
   ) : null;
-
-  const headerAction =
-    selectedChat && selectedChat.chat_id.startsWith(HUB) && !selectedChat.is_group ? (
-      <button className="header-btn" onClick={() => void showSafetyNumber()}>
-        Номер безопасности
-      </button>
-    ) : null;
 
   return (
     <>
@@ -493,6 +485,8 @@ export default function App() {
               <SearchPanel
                 directory={names}
                 selfLogin={auth.user.login}
+                blocked={chatsApi.blocked}
+                onUnblock={chatsApi.unblock}
                 query={searchQuery}
                 onQueryChange={setSearchQuery}
                 getAvatar={getAvatar}
@@ -526,7 +520,6 @@ export default function App() {
               composer={composer}
               messageStreamRef={messageStreamRef}
               banner={banner}
-              headerAction={headerAction}
               onComposerChange={setComposer}
               onSend={() => void handleSend()}
               onSendPaths={chatsApi.sendPaths}
@@ -574,20 +567,6 @@ export default function App() {
         />
       ) : null}
 
-      {safety !== null ? (
-        <div className="fx-modal-backdrop" onMouseDown={() => setSafety(null)}>
-          <div className="fx-modal fx-modal-small" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="fx-modal-title">Номер безопасности</div>
-            <div className="fx-modal-text">Сверьте его с собеседником. Если номера совпадают, переписку никто не подменил.</div>
-            <div className="cx-safety">{safety}</div>
-            <div className="fx-modal-actions">
-              <button className="fx-btn" onClick={() => setSafety(null)}>
-                Закрыть
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {rosterPrompt ? (
         <div className="fx-modal-backdrop">
@@ -611,7 +590,13 @@ export default function App() {
 
       <ErrorToast error={error} kind={toastKind} errorToastKey={errorToastKey} onClose={() => setErrorText("")} />
 
-      <ContextMenus chatContextMenu={chatContextMenu} onHideChat={handleHideChat} />
+      <ContextMenus
+        chatContextMenu={chatContextMenu}
+        onHideChat={handleHideChat}
+        onBlockChat={
+          chatContextMenu && chats.find((c) => c.chat_id === chatContextMenu.chatId)?.block_key ? handleBlockChat : null
+        }
+      />
     </>
   );
 }
