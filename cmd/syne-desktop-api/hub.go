@@ -37,7 +37,7 @@ func dataDir() string {
 	if err != nil {
 		dir = os.TempDir()
 	}
-	return filepath.Join(dir, "Syne")
+	return filepath.Join(dir, "Syne Desktop")
 }
 
 // start поднимает движок пользователя (повторный вызов для того же пользователя ничего не делает).

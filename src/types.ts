@@ -63,8 +63,6 @@ export interface Transfer {
   error?: string;
 }
 
-export type View = "chats" | "files" | "profile" | "settings";
-
 export interface AuthStateReason extends AuthState {
   reason?: string;
 }
@@ -172,3 +170,51 @@ export interface CloudChat {
   created_at: string;
   last_message?: CloudMessage | null;
 }
+
+// ── модель чата в интерфейсе (общая для защищённых бесед Key Hub и обычных облачных чатов) ──
+
+export type TransferProgress = {
+  id: string;
+  name: string;
+  done: number;
+  total: number; // 0 — размер неизвестен
+  state: "running" | "done" | "error";
+  error?: string;
+};
+
+/** Вложение сообщения: откуда его брать и как показывать. */
+export type MessageAttachment = {
+  source: "hub" | "cloud";
+  /** hub: id сообщения; cloud: id сообщения в чате. */
+  id: string;
+  chat_id: string;
+  kind: "photo" | "file";
+  name: string;
+  size: number;
+  thumb?: string; // base64 JPEG (только Key Hub)
+};
+
+export type ChatSummary = {
+  /** `hub:<собеседник>` — защищённая беседа, `cloud:<id>` — обычный облачный чат. */
+  chat_id: string;
+  peer_id: string;
+  title: string;
+  preview: string;
+  last_timestamp: number; // мс
+  unread_count: number;
+  /** Есть, если в беседу можно отправлять файлы (личная с аккаунтом или группа). */
+  peer_user_id?: string;
+  is_group?: boolean;
+  secure: boolean;
+};
+
+export type UIMessage = {
+  message_id: string;
+  chat_id: string;
+  from: string;
+  from_name?: string;
+  text: string;
+  timestamp: number; // мс
+  direction: "incoming" | "outgoing";
+  att?: MessageAttachment;
+};

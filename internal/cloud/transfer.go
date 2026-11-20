@@ -126,6 +126,15 @@ func apiError(resp *http.Response) error {
 
 // Upload отправляет файл чанками с докачкой при обрыве. parentID пустой — корень.
 func (c *Client) Upload(jobs *Jobs, path, parentID string) *Job {
+	return c.upload2(jobs, path, parentID, "", 0)
+}
+
+// UploadVersion заменяет содержимое существующего файла новой версией (fileID, версия, которую видел клиент).
+func (c *Client) UploadVersion(jobs *Jobs, path, fileID string, baseVersion int) *Job {
+	return c.upload2(jobs, path, "", fileID, baseVersion)
+}
+
+func (c *Client) upload2(jobs *Jobs, path, parentID, fileID string, baseVersion int) *Job {
 	st, err := os.Stat(path)
 	job := jobs.add("upload", filepath.Base(path), 0)
 	if err != nil || st.IsDir() {
@@ -134,7 +143,7 @@ func (c *Client) Upload(jobs *Jobs, path, parentID string) *Job {
 	}
 	jobs.update(job, func(x *Job) { x.Total = st.Size() })
 	go func() {
-		if err := c.upload(jobs, job, path, parentID, st.Size()); err != nil {
+		if err := c.upload(jobs, job, path, parentID, fileID, baseVersion, st.Size()); err != nil {
 			jobs.fail(job, err)
 			return
 		}
@@ -147,7 +156,7 @@ func (c *Client) Upload(jobs *Jobs, path, parentID string) *Job {
 	return job
 }
 
-func (c *Client) upload(jobs *Jobs, job *Job, path, parentID string, size int64) error {
+func (c *Client) upload(jobs *Jobs, job *Job, path, parentID, fileID string, baseVersion int, size int64) error {
 	f, err := os.Open(path)
 	if err != nil {
 		return fmt.Errorf("Не удалось открыть файл.")
@@ -160,7 +169,9 @@ func (c *Client) upload(jobs *Jobs, job *Job, path, parentID string, size int64)
 	sum := hex.EncodeToString(h.Sum(nil))
 
 	req := map[string]any{"name": filepath.Base(path), "size": size, "sha256": sum, "device": c.DeviceName}
-	if parentID != "" {
+	if fileID != "" {
+		req["file_id"], req["base_version"] = fileID, baseVersion
+	} else if parentID != "" {
 		req["parent_id"] = parentID
 	}
 	body, _ := json.Marshal(req)
@@ -268,6 +279,9 @@ func (c *Client) Download(jobs *Jobs, fileID, name string, size int64, version, 
 			if resp.StatusCode != 200 {
 				return apiError(resp)
 			}
+			if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+				return fmt.Errorf("Не удалось создать папку.")
+			}
 			tmp := dest + ".part"
 			out, err := os.Create(tmp)
 			if err != nil {
@@ -312,4 +326,55 @@ func (c *Client) Download(jobs *Jobs, fileID, name string, size int64, version, 
 		})
 	}()
 	return job
+}
+
+// mkdir создаёт папку в облаке (если такая уже есть, сервер возвращает её) и отдаёт её id.
+func (c *Client) mkdir(parentID, name string) (string, error) {
+	req := map[string]any{"name": name}
+	if parentID != "" {
+		req["parent_id"] = parentID
+	}
+	body, _ := json.Marshal(req)
+	resp, err := c.Do("POST", "files/folders", "", http.Header{"Content-Type": {"application/json"}}, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return "", apiError(resp)
+	}
+	var out struct {
+		File struct {
+			ID string `json:"id"`
+		} `json:"file"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out.File.ID == "" {
+		return "", fmt.Errorf("Облако вернуло неожиданный ответ.")
+	}
+	return out.File.ID, nil
+}
+
+// UploadTree: файл грузится как в Upload, папка создаётся в облаке и грузится вместе с содержимым.
+func (c *Client) UploadTree(jobs *Jobs, path, parentID string) {
+	st, err := os.Stat(path)
+	if err != nil || !st.IsDir() {
+		c.Upload(jobs, path, parentID)
+		return
+	}
+	id, err := c.mkdir(parentID, filepath.Base(path))
+	if err != nil {
+		jobs.fail(jobs.add("upload", filepath.Base(path), 0), err)
+		return
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		jobs.fail(jobs.add("upload", filepath.Base(path), 0), fmt.Errorf("Не удалось прочитать папку."))
+		return
+	}
+	for _, e := range entries {
+		if e.Type()&os.ModeSymlink != 0 {
+			continue // ссылки не выходят за пределы выбранной папки
+		}
+		c.UploadTree(jobs, filepath.Join(path, e.Name()), id)
+	}
 }
