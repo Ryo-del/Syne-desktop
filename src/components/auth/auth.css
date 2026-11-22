@@ -179,3 +179,45 @@
   min-height: 0;
   background: transparent;
 }
+
+/* Встроенная панель живёт в узкой колонке чатов: карточка и код не должны выходить за её границы. */
+.auth-overlay.gate-embedded {
+  min-width: 0;
+  overflow: hidden;
+  padding: 12px;
+  box-sizing: border-box;
+  align-items: flex-start;
+}
+
+.gate-embedded .auth-card {
+  box-sizing: border-box;
+  max-width: 100%;
+  min-width: 0;
+  padding: 20px 14px 16px;
+  gap: 10px;
+}
+
+.gate-embedded .auth-title {
+  font-size: 1.2rem;
+}
+
+.gate-embedded .auth-subtitle,
+.gate-embedded .auth-hint {
+  overflow-wrap: anywhere;
+  font-size: 0.8rem;
+}
+
+.gate-embedded .gate-code {
+  box-sizing: border-box;
+  max-width: 100%;
+  font-size: clamp(1.1rem, 7cqw, 1.6rem);
+  letter-spacing: 0.14em;
+  text-indent: 0.14em; /* компенсирует отступ после последней цифры, чтобы код был по центру */
+  padding: 10px 6px;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.gate-embedded .auth-card {
+  container-type: inline-size;
+}
