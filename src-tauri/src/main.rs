@@ -749,6 +749,11 @@ fn spawn_backend(app: &AppHandle, token: &str) -> Result<CommandChild, String> {
         args.push("--server".to_string());
         args.push(server);
     }
+    // Обновления только в релизной сборке: в `tauri dev` версия из конфига условная, и установщик запускать нельзя.
+    if !cfg!(debug_assertions) {
+        args.push("--version".to_string());
+        args.push(app.package_info().version.to_string());
+    }
     let (mut rx, child) = app
         .shell()
         .sidecar("syne-desktop-api")

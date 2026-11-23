@@ -236,3 +236,34 @@ export const hubSendFile = (peer: string, path: string, caption = "") =>
 export const hubSaveAttachment = (id: string, dest: string) =>
   json<HubState>("/hub/attachment/save", send("POST", { id, dest }));
 export const hubAttachmentBlob = async (id: string) => (await request(`/hub/attachment${qs({ id })}`)).blob();
+
+// ---- обновления приложения (локальный сервис проверяет Syne Web) ----
+
+export interface UpdateRelease {
+  version: string;
+  staged: boolean;
+  downloading: boolean;
+  download_error?: string;
+}
+export interface UpdateState {
+  available: boolean;
+  current?: string;
+  settings?: { enabled: boolean; auto_install: boolean };
+  checked_at?: string;
+  release?: UpdateRelease;
+  error?: string;
+  busy?: boolean;
+}
+
+export async function getUpdate(): Promise<UpdateState> {
+  return (await request("/update")).json();
+}
+export async function checkUpdate(): Promise<UpdateState> {
+  return (await request("/update/check", { method: "POST" })).json();
+}
+export async function saveUpdateSettings(s: { enabled: boolean; auto_install: boolean }): Promise<UpdateState> {
+  return (await request("/update/settings", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(s) })).json();
+}
+export async function installUpdate(): Promise<void> {
+  await request("/update/install", { method: "POST" });
+}

@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,8 @@ func main() {
 	addr := flag.String("addr", "127.0.0.1:38674", "адрес локального API")
 	server_ := flag.String("server", "", "адрес Syne Cloud")
 	exitOnStdin := flag.Bool("exit-on-stdin-close", false, "завершиться, когда закроется stdin")
+	version := flag.String("version", "", "версия приложения (для проверки обновлений); пусто — обновления выключены")
+	webURL := flag.String("web-url", "", "адрес Syne Web для обновлений (по умолчанию syne-network.ru)")
 	flag.Parse()
 
 	host, _ := os.Hostname()
@@ -38,6 +41,7 @@ func main() {
 	}
 	s := &server{token: os.Getenv("SYNE_API_TOKEN"), cl: cloud.New(*server_, host), jobs: cloud.NewJobs()}
 	s.hub = &hubService{s: s}
+	upd := newUpdateService(s, *version, *webURL)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]bool{"ok": true}) })
@@ -46,6 +50,7 @@ func main() {
 	mux.HandleFunc("/auth/logout", s.handleLogout)
 	mux.HandleFunc("/cloud/", s.handleProxy)
 	s.hub.register(mux)
+	upd.register(mux)
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/transfers", s.handleTransfers)
 	mux.HandleFunc("/transfers/upload", s.handleUpload)
@@ -58,6 +63,9 @@ func main() {
 	}
 	if *exitOnStdin {
 		go func() { _, _ = io.Copy(io.Discard, os.Stdin); os.Exit(0) }()
+	}
+	if upd != nil {
+		go upd.run(context.Background())
 	}
 	log.Printf("syne-desktop-api: %s", *addr)
 	log.Fatal((&http.Server{Handler: s.guard(mux), ReadHeaderTimeout: 10 * time.Second}).Serve(ln))

@@ -15,6 +15,7 @@ import {
   THEME_OPTIONS,
 } from "../../config/settings";
 import { APP_VERSION } from "../../config/appVersion";
+import UpdatePanel from "./UpdatePanel";
 import type { AuthState, HubState, Quota, User } from "../../types";
 import { AccountPanel, HubPanel } from "./AccountPanels";
 
@@ -483,6 +484,8 @@ export default function SettingsPopover({
               <section className="settings-section-card">
                 <div className="settings-version-row"><strong>{t("system.version")}</strong><span>{APP_VERSION}</span></div>
               </section>
+
+              <UpdatePanel t={t} />
             </div>
           ) : (
             <div className="settings-panel-empty" />
